@@ -267,16 +267,84 @@ difficult to build on Windows. The base install and both eazy engines run
 on any platform; if you need Prospector, use Linux or macOS.
 \end{warnbox}
 
-Prospector also needs a data checkout and an environment variable:
+Prospector also needs a copy of the FSPS data files and an environment
+variable pointing at them, set before every run:
 
 \cmdline{git clone https://github.com/cconroy20/fsps \textasciitilde/fsps}
 
 \cmdline{export SPS\_HOME=\textasciitilde/fsps}
 
-Ready-made conda environments for both spectral libraries live in
-\texttt{envs/}:
+\subsection{Choosing a stellar library: MILES or C3K}
+
+Prospector builds a galaxy's light out of model stellar spectra, and
+FSPS ships two libraries to draw them from: \textbf{MILES} (measured
+from real stars) and \textbf{C3K} (computed from stellar atmosphere
+models). They do not give the same answer, so every Prospector config
+has to say which one it used --- that is the \texttt{stellar\_library}
+field, either \texttt{"miles"} or \texttt{"c3k"}.
+
+The awkward part is that the library is fixed when FSPS is
+\textbf{compiled}, not when it runs. No setting switches between them.
+You need a separate environment for each, and plain
+\texttt{pip install fsps} gives you the MILES build.
+
+\textbf{MILES} works out of the box:
 
 \cmdline{conda env create -f envs/sedfit\_miles.yml}
+
+\textbf{C3K} takes one extra step. Creating the environment is not
+enough: its \texttt{.yml} installs the same pre-built package everyone
+else gets, which is MILES. You have to rebuild FSPS afterwards.
+
+\begin{cmd}\ttfamily
+conda env create -f envs/sedfit\_c3k.yml\\
+conda activate sedfit\_c3k\\
+FFLAGS="-DMILES=0 -DC3K=1" pip install -{}-force-reinstall \textbackslash\\
+\hspace*{4em}-{}-no-cache-dir -{}-no-binary fsps fsps==0.4.7
+\end{cmd}
+
+That compiles FSPS from Fortran source. It takes a few minutes and needs
+a Fortran compiler on the machine.
+
+\textbf{Check what a given environment actually has:}
+
+\begin{cmd}\ttfamily
+python -c "import fsps; \textbackslash\\
+\hspace*{2em}print(fsps.StellarPopulation(zcontinuous=1).libraries)"
+\end{cmd}
+
+The middle entry is the spectral library:
+
+\begin{cmd}\ttfamily
+sedfit\_miles~~->~~(b'mist', b'miles', b'DL07')\\
+sedfit\_c3k~~~~->~~(b'mist', b'c3k\_a', b'DL07')
+\end{cmd}
+
+If the C3K environment still reports \texttt{miles}, the rebuild did not
+take. Run it again and watch for compiler errors --- a failed build
+leaves the previous install in place rather than removing it.
+
+\begin{notebox}[The fit checks this for you]
+Every Prospector fit compares the config's \texttt{stellar\_library}
+against the library the live FSPS build reports, before it does any
+work, and stops if they disagree:
+
+\smallskip
+\begin{cmd}\ttfamily\small
+stellar\_library mismatch: the config declares 'c3k' (FSPS stamp\\
+'c3k\_a') but the live build reports 'miles'; run in the matching\\
+sedfit env
+\end{cmd}
+\smallskip
+
+Activating the wrong environment therefore costs you a clear error, not
+a quietly wrong answer. Nothing is written when this fires, so there is
+no half-finished run to clean up.
+\end{notebox}
+
+Results from the two libraries are not interchangeable. Compare fits
+within one library, or treat the difference between them as one of the
+things you are measuring.
 
 \subsection{Verify the install}
 
@@ -534,9 +602,25 @@ sedfit run -{}-catalog sample.csv -{}-campaign campaign.json \textbackslash\\
 
 \subsection{A note on long commands}
 
-The backslash at the end of a line means ``the command continues on the
-next line.'' That works in Anaconda Prompt on Windows and in any macOS or
-Linux terminal. You can always type the whole thing on one line instead.
+A few commands below are too wide for one line and are shown broken
+across two, with a trailing \texttt{\textbackslash}. That is the
+continuation character for bash and zsh (macOS, Linux).
+
+\begin{center}
+\begin{tabular}{L{6.0cm} L{5.5cm}}
+\toprule
+\textbf{Shell} & \textbf{Continuation character} \\
+\midrule
+macOS / Linux (bash, zsh) & \texttt{\textbackslash} \\
+Windows Command Prompt / Anaconda Prompt & \texttt{\textasciicircum} \\
+Windows PowerShell & \texttt{\textasciigrave}\ (backtick) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+On Windows, either swap the trailing \texttt{\textbackslash} for the
+right character, or --- simplest and always correct --- delete the line
+break and paste the whole thing as one long line.
 
 \subsection{Add galaxies to the sample}
 
