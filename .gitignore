@@ -9,3 +9,9 @@ DESIGN.md
 # "CLAUDE 2.md" conflict copies a syncing filesystem leaves behind.
 CLAUDE*.md
 session_log*.md
+
+# LaTeX build products
+*.aux
+*.log
+*.out
+*.toc

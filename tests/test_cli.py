@@ -5,11 +5,10 @@ import json
 import subprocess
 import sys
 
-import pytest
-
 from test_generate import CAMPAIGN, _catalog, _row, _tree
 
-pytest.importorskip("eazy")
+# These exercise the quick engine, which needs no eazy-py, so they run on
+# a core install.
 
 NO_SPHEREX_RECIPE = {
     "plain": {"reference": "none",

@@ -29,6 +29,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
@@ -47,6 +48,10 @@ else:
 
 MACHINERY_KEYS = ("package_version", "git_rev", "git_dirty",
                   "fsps_libraries", "versions")
+# The manifest lock's sentinel byte, past any real manifest, and how long
+# to wait for it. Windows locks a byte range; POSIX ignores the offset.
+LOCK_OFFSET = 1 << 40
+LOCK_TIMEOUT_S = 120.0
 _LABEL_OK = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -167,28 +172,50 @@ def stage_run(
 
 @contextmanager
 def _exclusive_lock(path: Path) -> Iterator[None]:
-    """Hold an exclusive lock on the first byte of path for the block.
+    """Hold an exclusive lock on path for the duration of the block.
 
     The lock is taken on its own file descriptor, so the caller is free
-    to open the same file separately for appending. Windows uses
-    msvcrt.locking, every other platform fcntl.flock.
+    to open the same file separately for appending.
+
+    Windows byte-range locks are mandatory and are enforced against
+    every handle, including other handles in the same process, so the
+    locked byte sits at LOCK_OFFSET -- far past any manifest -- and the
+    append never collides with it. POSIX uses whole-file flock, where
+    the offset is irrelevant.
     """
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     try:
         if sys.platform == "win32":
-            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+            _lock_windows(fd)
         else:
             fcntl.flock(fd, fcntl.LOCK_EX)
         yield
     finally:
         try:
             if sys.platform == "win32":
-                os.lseek(fd, 0, os.SEEK_SET)
+                os.lseek(fd, LOCK_OFFSET, os.SEEK_SET)
                 msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
             else:
                 fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
             os.close(fd)
+
+
+def _lock_windows(fd: int) -> None:
+    """Block on the sentinel byte until the lock is ours.
+
+    msvcrt.locking gives up after about ten seconds, which a busy batch
+    can exceed, so the wait is retried up to LOCK_TIMEOUT_S.
+    """
+    deadline = time.monotonic() + LOCK_TIMEOUT_S
+    while True:
+        os.lseek(fd, LOCK_OFFSET, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise
 
 
 def append_row(manifest_path: str | Path, row: dict) -> None:

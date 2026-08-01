@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pytest
 from test_build import _tree
-from test_eazy_backend import _fake_templates
+from synthetic import fake_templates as _fake_templates
 
 from sedfit.core.build import build_target, write_build
 from sedfit.core.fitconfig import parse_fit_config

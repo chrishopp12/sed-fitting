@@ -1,0 +1,936 @@
+% sedfit User Manual
+% Build with:  pdflatex sedfit_user_manual.tex   (run twice for the TOC)
+
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{fancyhdr}
+\usepackage{amsmath}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{titlesec}
+\usepackage[most]{tcolorbox}
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+
+\definecolor{headblue}{RGB}{31,78,121}
+\definecolor{codebg}{RGB}{245,245,245}
+\definecolor{noteorange}{RGB}{180,95,20}
+\definecolor{warnred}{RGB}{160,30,30}
+
+\titleformat{\section}{\Large\bfseries\color{headblue}}{\thesection}{1em}{}
+\titleformat{\subsection}{\large\bfseries\color{headblue}}{\thesubsection}{1em}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small sedfit user manual}
+\rhead{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% A shell command block.
+\newtcolorbox{cmd}{
+  colback=codebg, colframe=codebg, boxrule=0pt,
+  left=6pt, right=6pt, top=4pt, bottom=4pt,
+  before skip=6pt, after skip=6pt
+}
+
+\newtcolorbox{notebox}[1][Note]{
+  breakable, colback=noteorange!5, colframe=noteorange,
+  boxrule=0.8pt, title=#1, fonttitle=\bfseries\small
+}
+
+\newtcolorbox{warnbox}[1][Careful]{
+  breakable, colback=warnred!5, colframe=warnred,
+  boxrule=0.8pt, title=#1, fonttitle=\bfseries\small
+}
+
+\newcommand{\cmdline}[1]{\begin{cmd}\ttfamily #1\end{cmd}}
+
+\setlist[itemize]{itemsep=2pt, topsep=4pt}
+\setlist[enumerate]{itemsep=2pt, topsep=4pt}
+
+\title{\vspace{4cm}\Huge\textbf{sedfit}\\[0.6cm]
+       \Large User Manual\\[1.2cm]
+       \normalsize Photometry in, redshifts out}
+\author{}
+\date{\vspace{6cm}\normalsize Version 0.1.0}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\newpage
+
+\tableofcontents
+\newpage
+
+% ==========================================================
+\section{What this does}
+% ==========================================================
+
+\texttt{sedfit} takes photometry you already have for a set of galaxies
+and fits each one's spectral energy distribution to estimate its
+redshift.
+
+You give it three things:
+
+\begin{enumerate}
+  \item a \textbf{sample catalog} --- a spreadsheet listing your
+        galaxies, one row each;
+  \item a \textbf{campaign config} --- a settings file saying which
+        photometry files to expect and how to combine them;
+  \item a \textbf{fit config} --- a settings file saying how to fit.
+\end{enumerate}
+
+It then does three things:
+
+\begin{enumerate}
+  \item \textbf{Builds} one combined photometry table per galaxy, putting
+        every instrument on a common flux scale.
+  \item \textbf{Fits} that table with one of two engines and estimates a
+        redshift with uncertainties.
+  \item \textbf{Records} everything --- every input file is hashed, every
+        setting is saved next to the results, and every run is logged in
+        one central file.
+\end{enumerate}
+
+Fluxes are in microjansky on the AB system throughout. Everything for one
+galaxy lands under that galaxy's own directory.
+
+% ==========================================================
+\section{Installing}
+% ==========================================================
+
+These instructions assume the machine has nothing set up yet. Commands
+are the same on all three operating systems unless stated otherwise.
+
+\subsection{Get Python}
+
+\texttt{sedfit} needs \textbf{Python 3.11 or newer} plus a scientific
+stack (NumPy, SciPy, Astropy, Pandas, Matplotlib).
+
+Use \textbf{Miniconda}. Conda installs Python and the scientific
+libraries as pre-built binaries, which avoids the compiler toolchain some
+of these packages otherwise need, and it keeps each project's libraries
+separate so one project cannot break another.
+
+\textbf{Windows}
+\begin{enumerate}
+  \item Go to \url{https://www.anaconda.com/download/success} and
+        download the \textbf{Miniconda Windows 64-bit installer}
+        (\texttt{.exe}).
+  \item Run the installer and accept the defaults.
+  \item From the Start menu, open \textbf{Anaconda Prompt}. Every command
+        in this manual is typed there.
+\end{enumerate}
+
+\textbf{macOS}
+\begin{enumerate}
+  \item Download the \textbf{Miniconda macOS installer} for your chip
+        (Apple silicon = \texttt{arm64}, Intel = \texttt{x86\_64}).
+  \item Run it, then open \textbf{Terminal}.
+\end{enumerate}
+
+\textbf{Linux}
+\begin{enumerate}
+  \item Download the Miniconda Linux \texttt{x86\_64} installer script.
+  \item Run \texttt{bash Miniconda3-latest-Linux-x86\_64.sh}, then open a
+        new terminal.
+\end{enumerate}
+
+Check that conda is available:
+
+\cmdline{conda -{}-version}
+
+You should see something like \texttt{conda 24.9.2}.
+
+\subsection{Get the code}
+
+The source lives at \url{https://github.com/chrishopp12/sed-fitting}.
+
+\textbf{With git.} On Windows, install Git for Windows from
+\url{https://git-scm.com/download/win} first; macOS and Linux usually
+have git already. Then:
+
+\cmdline{git clone https://github.com/chrishopp12/sed-fitting.git}
+
+This creates a folder named \texttt{sed-fitting}. Move into it:
+
+\cmdline{cd sed-fitting}
+
+\textbf{Without git.} Open the page in a browser, click the green
+\textbf{Code} button, choose \textbf{Download ZIP}, and unzip it. You get
+a folder named \texttt{sed-fitting-main}. Move into it:
+
+\cmdline{cd sed-fitting-main}
+
+You are in the right folder if it contains a file named
+\texttt{pyproject.toml}.
+
+\begin{notebox}[The download is about 60 MB]
+Most of that is the packaged template libraries --- the galaxy spectra
+the fit compares your photometry against. They ship with the code so a
+fit is reproducible without downloading anything else.
+\end{notebox}
+
+\subsection{Create an environment and install}
+
+\textbf{Conda route (recommended, all platforms).}
+
+\cmdline{conda create -n sedfit python=3.12}
+
+Answer \texttt{y} when it asks. Then activate it:
+
+\cmdline{conda activate sedfit}
+
+Your prompt now starts with \texttt{(sedfit)}. Install the package:
+
+\cmdline{pip install -e .}
+
+That reads \texttt{pyproject.toml} and pulls in every dependency.
+
+If a dependency fails to build, install the scientific stack from
+conda-forge first and then install \texttt{sedfit} without re-resolving:
+
+\cmdline{conda install -c conda-forge numpy scipy pandas astropy matplotlib}
+
+\cmdline{pip install -e . -{}-no-deps}
+
+\textbf{pip / venv route (no conda).} Only use this if Python 3.11+ is
+already installed and on your PATH.
+
+Windows:
+
+\cmdline{python -m venv .venv}
+
+\cmdline{.venv\textbackslash Scripts\textbackslash activate}
+
+macOS / Linux:
+
+\cmdline{python3 -m venv .venv}
+
+\cmdline{source .venv/bin/activate}
+
+Then, on any platform:
+
+\cmdline{pip install -e .}
+
+\subsection{What ``editable'' means}
+
+\texttt{pip install -e .} installs the package \textbf{in place}: Python
+runs the source files in the folder you downloaded, rather than a copy
+hidden in the environment. If you \texttt{git pull} a newer version, the
+change takes effect immediately with no reinstall.
+
+\subsection{Optional extras}
+
+The base install runs everything in this manual. Two extras add
+alternative fitting engines:
+
+\cmdline{pip install -e ".[eazy]"\qquad\# the official eazy-py engine}
+
+\cmdline{pip install -e ".[prospector]"\qquad\# Prospector + FSPS}
+
+\begin{warnbox}[Prospector on Windows]
+Prospector needs FSPS, which compiles from Fortran source and is
+difficult to build on Windows. The base install and both eazy engines run
+on any platform; if you need Prospector, use Linux or macOS.
+\end{warnbox}
+
+Prospector also needs a data checkout and an environment variable:
+
+\cmdline{git clone https://github.com/cconroy20/fsps \textasciitilde/fsps}
+
+\cmdline{export SPS\_HOME=\textasciitilde/fsps}
+
+Ready-made conda environments for both spectral libraries live in
+\texttt{envs/}:
+
+\cmdline{conda env create -f envs/sedfit\_miles.yml}
+
+\subsection{Verify the install}
+
+\cmdline{sedfit -{}-help}
+
+You should see a list of seven verbs: \texttt{roster}, \texttt{build},
+\texttt{fit}, \texttt{batch}, \texttt{run}, \texttt{plot},
+\texttt{manifest}. Then run the test suite:
+
+\cmdline{python -m pytest tests/}
+
+Everything should pass. Tests for an engine you did not install skip
+themselves rather than failing.
+
+% ==========================================================
+\section{Before you start}
+% ==========================================================
+
+\texttt{sedfit} does not download photometry. It expects the photometry
+files to be on disk already, laid out one directory per galaxy.
+
+\subsection{The directory layout it expects}
+
+\begin{cmd}\ttfamily
+data\_root/\\
+\hspace*{2em}gal\_0001/\\
+\hspace*{4em}Photometry/\\
+\hspace*{6em}gal\_0001\_catalog.csv\\
+\hspace*{6em}gal\_0001\_measured.csv\\
+\hspace*{6em}SPHEREx/\\
+\hspace*{8em}table\_photometry.csv\\
+\hspace*{2em}gal\_0002/\\
+\hspace*{4em}Photometry/\\
+\hspace*{6em}...
+\end{cmd}
+
+You choose where \texttt{data\_root} is and what the galaxy directories
+are called; the campaign config points at them. Names like
+\texttt{Photometry/} are conventions the campaign config declares, not
+rules baked into the code.
+
+\subsection{What a photometry file must contain}
+
+Every source CSV needs four columns:
+
+\begin{center}
+\begin{tabular}{ll}
+\hline
+\textbf{Column} & \textbf{Meaning} \\
+\hline
+\texttt{band} & the filter name, e.g. \texttt{Legacy\_g} \\
+\texttt{flux\_uJy} & flux in microjansky \\
+\texttt{flux\_err\_uJy} & its uncertainty \\
+\texttt{source} & where the measurement came from \\
+\hline
+\end{tabular}
+\end{center}
+
+The \texttt{source} column matters more than it looks. One file can hold
+measurements from several archives, and \texttt{sedfit} tells them apart
+by the start of this string --- \texttt{Legacy\_DR9},
+\texttt{SDSS\_DR17\_cModel}, and so on. It is how the same band can come
+from two different places in one file.
+
+\subsection{The three files you write}
+
+\textbf{1. The sample catalog} (a CSV, one row per galaxy). This is the
+file you edit as the sample grows.
+
+\begin{cmd}\ttfamily
+name,ra\_deg,dec\_deg,dir,z\_ref\_kind,z\_ref\\
+gal\_0001,217.51,56.99,gal\_0001,spec,0.1043\\
+gal\_0002,217.62,57.02,gal\_0002,spec,0.1058\\
+gal\_0003,217.44,56.95,gal\_0003,reference,
+\end{cmd}
+
+\begin{center}
+\begin{tabular}{ll}
+\hline
+\textbf{Column} & \textbf{Meaning} \\
+\hline
+\texttt{name} & the galaxy's name; must be unique \\
+\texttt{ra\_deg}, \texttt{dec\_deg} & position in degrees \\
+\texttt{dir} & its directory under \texttt{data\_root} (optional; defaults to the name) \\
+\texttt{z\_ref\_kind} & \texttt{spec}, \texttt{phot}, or \texttt{reference} \\
+\texttt{z\_ref} & the known redshift; \textbf{leave blank} for \texttt{reference} \\
+\texttt{label} & the filename stem (optional; defaults from the name) \\
+\hline
+\end{tabular}
+\end{center}
+
+\texttt{z\_ref\_kind} says where the comparison redshift comes from.
+Use \texttt{spec} or \texttt{phot} when the galaxy has its own measured
+value, and \texttt{reference} when it should adopt the sample-wide
+redshift set in the campaign config. Columns \texttt{sedfit} does not
+recognize are ignored and reported, so you can keep your own notes in the
+same file.
+
+\textbf{2. The campaign config} (\texttt{campaign.json}). Everything
+shared across galaxies. A minimal one:
+
+\begin{cmd}\ttfamily
+\{\\
+\hspace*{2em}"schema\_version": 1,\\
+\hspace*{2em}"sample": "my\_sample",\\
+\hspace*{2em}"data\_root": "..",\\
+\hspace*{2em}"position\_authority": "Legacy DR9 positions",\\
+\hspace*{2em}"sources": \{\\
+\hspace*{4em}"legacy": \{\\
+\hspace*{6em}"path": "Photometry/\{label\}\_catalog.csv",\\
+\hspace*{6em}"bands": ["Legacy\_g", "Legacy\_r", "Legacy\_z"],\\
+\hspace*{6em}"kind": "catalog",\\
+\hspace*{6em}"provider": "legacy"\\
+\hspace*{4em}\}\\
+\hspace*{2em}\},\\
+\hspace*{2em}"recipes": \{\\
+\hspace*{4em}"plain": \{\\
+\hspace*{6em}"reference": "none",\\
+\hspace*{6em}"sources": [\{"source": "legacy", "role": "float"\}],\\
+\hspace*{6em}"spherex": null\\
+\hspace*{4em}\}\\
+\hspace*{2em}\}\\
+\}
+\end{cmd}
+
+\texttt{data\_root} is relative to the campaign file. A \emph{source} is
+one photometry file and the bands you expect from it; \texttt{\{label\}}
+is replaced with each galaxy's filename stem. A \emph{recipe} is one way
+to combine those sources into a table --- you can define several and run
+them all.
+
+\textbf{3. The fit config} (e.g.\ \texttt{quick.json}). How to fit:
+
+\begin{cmd}\ttfamily
+\{\\
+\hspace*{2em}"schema\_version": 2,\\
+\hspace*{2em}"backend": "eazy",\\
+\hspace*{2em}"name": "quick\_v1",\\
+\hspace*{2em}"err\_floor": 0.05,\\
+\hspace*{2em}"eazy": \{\\
+\hspace*{4em}"engine": "quick",\\
+\hspace*{4em}"z\_min": 0.0,\\
+\hspace*{4em}"z\_max": 1.0,\\
+\hspace*{4em}"z\_step": 0.001,\\
+\hspace*{4em}"templates": "brown14\_vac\_cosmos160"\\
+\hspace*{2em}\}\\
+\}
+\end{cmd}
+
+\begin{notebox}[You must name a template set]
+There is no default. The template set is the single biggest influence on
+the redshift you get out, so the code makes you choose it deliberately.
+Name any of the sets shipped in \texttt{sedfit/data/templates/} ---
+\texttt{brown14\_vac\_cosmos160} is the recommended one --- or give a path
+to your own directory of spectra.
+\end{notebox}
+
+% ==========================================================
+\section{The verbs}
+% ==========================================================
+
+\begin{center}
+\begin{tabular}{>{\ttfamily}l p{10.2cm}}
+\hline
+\textbf{\normalfont Verb} & \textbf{What it does} \\
+\hline
+roster   & Reads your sample catalog and campaign config, checks what is
+           actually on disk, and writes \texttt{roster.json} \\
+build    & Combines each galaxy's photometry into one fit-ready table \\
+fit      & Fits one galaxy with one recipe \\
+batch    & Fits every galaxy, in parallel, and writes a report \\
+run      & Does \texttt{roster}, \texttt{build} and \texttt{batch} in one command \\
+plot     & Redraws the figures for a run you already have \\
+manifest & Summarizes every run recorded so far \\
+\hline
+\end{tabular}
+\end{center}
+
+The normal working order is \texttt{roster} $\rightarrow$ \texttt{build}
+$\rightarrow$ \texttt{batch}. The \texttt{run} verb chains those three,
+and is what you want most of the time.
+
+Every verb explains itself:
+
+\cmdline{sedfit -{}-help \qquad sedfit build -{}-help}
+
+% ==========================================================
+\section{Your first run}
+% ==========================================================
+
+Put your sample catalog and campaign config next to each other, then:
+
+\textbf{Step 1 --- check what the code can see.} This writes nothing:
+
+\begin{cmd}\ttfamily
+sedfit roster -{}-catalog sample.csv -{}-campaign campaign.json -{}-dry-run
+\end{cmd}
+
+You get a line per galaxy-and-source that did not work out:
+
+\begin{cmd}\ttfamily
+sample.csv: 3 rows; using name, ra\_deg, dec\_deg, z\_ref\_kind, z\_ref, dir\\
+3 catalog rows -> 3 targets\\
+\hspace*{2em}1 dropped, 8 kept\\
+\hspace*{2em}dropped~~gal\_0003/legacy: Photometry/gal\_0003\_catalog.csv: absent\\
+dry run: nothing written
+\end{cmd}
+
+Read that carefully before going on --- it is telling you which files it
+found and which it did not.
+
+\textbf{Step 2 --- write the roster.} Drop \texttt{-{}-dry-run}:
+
+\begin{cmd}\ttfamily
+sedfit roster -{}-catalog sample.csv -{}-campaign campaign.json
+\end{cmd}
+
+This writes \texttt{roster.json} next to the campaign file, plus
+\texttt{roster.json.report.csv}, which has one row per galaxy-and-source
+with the reason it was kept, partially kept, or dropped.
+
+\begin{warnbox}[Never edit roster.json by hand]
+It is generated. If something in it is wrong, fix the sample catalog or
+the campaign config and run \texttt{sedfit roster} again --- it takes
+seconds. Hand edits are silently overwritten the next time anyone
+regenerates it.
+\end{warnbox}
+
+\textbf{Step 3 --- build and fit everything:}
+
+\begin{cmd}\ttfamily
+sedfit batch -{}-roster roster.json -{}-config quick.json -{}-build
+\end{cmd}
+
+You get a line per job as it finishes:
+
+\begin{cmd}\ttfamily
+6 jobs (eazy), 3 worker(s); 0 pair(s) not applicable\\
+{[1/6]} ok\hspace*{6em}gal\_0001/plain z50=0.1043\\
+{[2/6]} ok\hspace*{6em}gal\_0002/plain z50=0.1061\\
+...\\
+6 ok, 0 failed, 0 skipped -> batch\_report.csv
+\end{cmd}
+
+\textbf{Or do all three steps at once:}
+
+\begin{cmd}\ttfamily
+sedfit run -{}-catalog sample.csv -{}-campaign campaign.json \textbackslash\\
+\hspace*{4em}-{}-config quick.json
+\end{cmd}
+
+% ==========================================================
+\section{Common tasks}
+% ==========================================================
+
+\subsection{A note on long commands}
+
+The backslash at the end of a line means ``the command continues on the
+next line.'' That works in Anaconda Prompt on Windows and in any macOS or
+Linux terminal. You can always type the whole thing on one line instead.
+
+\subsection{Add galaxies to the sample}
+
+Add rows to your sample catalog, then regenerate and re-run:
+
+\begin{cmd}\ttfamily
+sedfit roster -{}-catalog sample.csv -{}-campaign campaign.json\\
+sedfit batch -{}-roster roster.json -{}-config quick.json -{}-build
+\end{cmd}
+
+Galaxies that were already fitted are skipped automatically, so only the
+new ones cost time. This is the everyday loop.
+
+\subsection{Fit one galaxy}
+
+\begin{cmd}\ttfamily
+sedfit fit -{}-roster roster.json -{}-target gal\_0001 \textbackslash\\
+\hspace*{4em}-{}-recipe plain -{}-config quick.json
+\end{cmd}
+
+\subsection{Check a command before running it}
+
+\texttt{-{}-dry-run} validates everything and writes nothing. Use it
+whenever you have changed a config:
+
+\begin{cmd}\ttfamily
+sedfit fit -{}-roster roster.json -{}-target gal\_0001 \textbackslash\\
+\hspace*{4em}-{}-recipe plain -{}-config quick.json -{}-dry-run
+\end{cmd}
+
+\subsection{Build tables without fitting}
+
+\begin{cmd}\ttfamily
+sedfit build -{}-roster roster.json
+\end{cmd}
+
+Add \texttt{-{}-target} or \texttt{-{}-recipe} to narrow it down.
+
+\subsection{Run only some galaxies}
+
+Put the names in a CSV with a \texttt{name} column --- your sample
+catalog works directly --- and pass it:
+
+\begin{cmd}\ttfamily
+sedfit batch -{}-roster roster.json -{}-config quick.json \textbackslash\\
+\hspace*{4em}-{}-targets subset.csv
+\end{cmd}
+
+Or a single one with \texttt{-{}-target gal\_0001}.
+
+\subsection{Run only one recipe}
+
+\begin{cmd}\ttfamily
+sedfit batch -{}-roster roster.json -{}-config quick.json -{}-recipe plain
+\end{cmd}
+
+\subsection{Correct for Milky Way dust}
+
+\begin{cmd}\ttfamily
+sedfit batch -{}-roster roster.json -{}-config quick.json \textbackslash\\
+\hspace*{4em}-{}-build -{}-deredden
+\end{cmd}
+
+This looks up the extinction at each galaxy's position and writes a
+separate \texttt{\_dered} table, leaving the uncorrected one alone.
+
+\begin{warnbox}[Use -{}-build with -{}-deredden]
+\texttt{-{}-deredden} tells the fit to look for the dereddened table. If
+you do not also pass \texttt{-{}-build}, that table may not exist and the
+fit will tell you so.
+\end{warnbox}
+
+\subsection{Redo a fit that already exists}
+
+By default a batch skips galaxies already fitted with the same settings.
+To force it:
+
+\begin{cmd}\ttfamily
+sedfit batch -{}-roster roster.json -{}-config quick.json -{}-no-resume
+\end{cmd}
+
+If it then complains that the existing run came from different software,
+add \texttt{-{}-force}.
+
+\subsection{Use more or fewer processors}
+
+\begin{cmd}\ttfamily
+sedfit batch -{}-roster roster.json -{}-config quick.json -{}-workers 4
+\end{cmd}
+
+\texttt{-{}-workers 1} runs everything in one process, which makes error
+messages much easier to read. Use it when debugging.
+
+\subsection{Redraw figures}
+
+\begin{cmd}\ttfamily
+sedfit plot -{}-run-dir gal\_0001/SED/plain/eazy/64f456f8835f-quick\_v1
+\end{cmd}
+
+\subsection{See everything that has been run}
+
+\begin{cmd}\ttfamily
+sedfit manifest -{}-roster roster.json
+\end{cmd}
+
+\begin{cmd}\ttfamily
+792 rows, 792 current runs, 0 superseded\\
+\hspace*{2em}64f456f8835f~~ok~~~~~~gal\_0001/SED/plain/eazy/...~~z50=0.1043
+\end{cmd}
+
+% ==========================================================
+\section{Every flag, explained}
+% ==========================================================
+
+\texttt{sedfit <verb> -{}-help} always prints the current list. This
+section explains what the less obvious ones mean.
+
+\subsection{Shared by \texttt{fit}, \texttt{batch} and \texttt{run}}
+
+\begin{longtable}{>{\ttfamily}l p{9.4cm}}
+\hline
+\textbf{\normalfont Flag} & \textbf{Meaning} \\
+\hline
+\endhead
+-{}-force & Replace an existing run even though it was produced by
+  different package versions. Without this, the code refuses, because the
+  old and new results would not be comparable. \\
+-{}-allow-registry-drift & Record a warning instead of stopping when a
+  filter curve has changed since the table was built. \\
+-{}-deredden & Fit the Milky-Way-corrected (\texttt{\_dered}) table. \\
+-{}-no-plots & Skip the figures. Faster for large sweeps. \\
+\hline
+\end{longtable}
+
+\subsection{\texttt{roster}}
+
+\begin{longtable}{>{\ttfamily}l p{9.4cm}}
+\hline
+\textbf{\normalfont Flag} & \textbf{Meaning} \\
+\hline
+\endhead
+-{}-catalog & Your sample catalog CSV. Required. \\
+-{}-campaign & Your campaign config JSON. Required. \\
+-{}-out & Where to write the roster. Defaults to \texttt{roster.json}
+  beside the campaign file. \\
+-{}-dry-run & Report what would be declared; write nothing. \\
+\hline
+\end{longtable}
+
+\subsection{\texttt{build}}
+
+\begin{longtable}{>{\ttfamily}l p{9.4cm}}
+\hline
+\textbf{\normalfont Flag} & \textbf{Meaning} \\
+\hline
+\endhead
+-{}-roster & The roster JSON. Required. \\
+-{}-target & Build one galaxy; omit for all of them. \\
+-{}-recipe & Build one recipe; omit for every applicable one. \\
+-{}-dry-run & Validate every pair; write nothing. \\
+-{}-deredden & Also write the Milky-Way-corrected table. \\
+-{}-mw-ebv & Use one E(B--V) for every galaxy instead of looking each one
+  up. Needs \texttt{-{}-deredden}. \\
+\hline
+\end{longtable}
+
+\subsection{\texttt{fit}}
+
+\begin{longtable}{>{\ttfamily}l p{9.4cm}}
+\hline
+\textbf{\normalfont Flag} & \textbf{Meaning} \\
+\hline
+\endhead
+-{}-target & Which galaxy. \\
+-{}-recipe & Which recipe's built table to fit. \\
+-{}-config & The fit config JSON. \\
+-{}-label & A suffix for the output directory name. Defaults to the
+  \texttt{name} in the fit config. \\
+-{}-jobs & A JSON list of \{target, recipe, config\} objects to run in
+  order, instead of naming one. \\
+-{}-phot-csv & Fit this photometry file instead of the built one. For
+  one-off tests. \\
+-{}-dry-run & Resolve and validate; write nothing. \\
+\hline
+\end{longtable}
+
+\subsection{\texttt{batch} and \texttt{run}}
+
+\begin{longtable}{>{\ttfamily}l p{9.4cm}}
+\hline
+\textbf{\normalfont Flag} & \textbf{Meaning} \\
+\hline
+\endhead
+-{}-config & The fit config applied to every galaxy. Required. \\
+-{}-targets & A CSV whose \texttt{name} column picks the galaxies. \\
+-{}-target & A single galaxy, instead of \texttt{-{}-targets}. \\
+-{}-recipe & One recipe; omit for every applicable one. \\
+-{}-workers & How many processes. Omit to choose automatically. \\
+-{}-build & Rebuild each table before fitting it. \\
+-{}-no-resume & Re-run galaxies already finished. \\
+-{}-report & Where to write the report CSV. \\
+-{}-log-dir & Where to write the per-galaxy logs. \\
+-{}-stop-after-failures & Give up after this many failures.
+  \texttt{0} disables the limit. \\
+\hline
+\end{longtable}
+
+\texttt{run} additionally takes \texttt{-{}-catalog}, \texttt{-{}-campaign}
+and \texttt{-{}-out}, which behave exactly as they do for
+\texttt{roster}.
+
+% ==========================================================
+\section{What comes out}
+% ==========================================================
+
+\subsection{The directory tree}
+
+\begin{cmd}\ttfamily
+gal\_0001/\\
+\hspace*{2em}Photometry/\\
+\hspace*{4em}gal\_0001\_catalog.csv\hspace*{2em}(yours, untouched)\\
+\hspace*{4em}gal\_0001\_sed\_plain.csv\hspace*{1em}the combined table\\
+\hspace*{4em}gal\_0001\_sed\_plain.provenance.json\\
+\hspace*{2em}SED/\\
+\hspace*{4em}plain/\hspace*{9em}one folder per recipe\\
+\hspace*{6em}eazy/\hspace*{8.5em}one folder per engine\\
+\hspace*{8em}64f456f8835f-quick\_v1/\hspace*{1em}one run\\
+\hspace*{10em}config.json\\
+\hspace*{10em}phot.csv\\
+\hspace*{10em}manifest.json\\
+\hspace*{10em}summary.csv\\
+\hspace*{10em}plots/
+\end{cmd}
+
+The long name on the run folder is not random. It is a fingerprint of the
+settings, the photometry and the filter curves. Fit the same galaxy the
+same way twice and you get the same folder --- it is replaced, not
+duplicated. Change anything that matters and you get a new folder, so
+results from different settings can never be confused.
+
+\subsection{What each file is}
+
+\begin{center}
+\begin{tabular}{>{\ttfamily}l p{9.2cm}}
+\hline
+\textbf{\normalfont File} & \textbf{What it holds} \\
+\hline
+\_sed\_<recipe>.csv & The combined photometry the fit used \\
+.provenance.json & Every input file, hashed, and every choice made \\
+config.json & The complete settings, with defaults filled in \\
+phot.csv & An exact copy of the photometry this run fitted \\
+manifest.json & This run's result line \\
+summary.csv & Redshifts and chi-square \\
+arrays.npz & The redshift grid and the probability curve \\
+plots/ & The figures \\
+batch\_report.csv & One row per galaxy from a batch \\
+runs.jsonl & Every run ever, appended \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{The numbers you probably want}
+
+\texttt{batch\_report.csv} is the quickest place to look:
+
+\begin{center}
+\begin{tabular}{>{\ttfamily}l p{8.8cm}}
+\hline
+\textbf{\normalfont Column} & \textbf{Meaning} \\
+\hline
+target, recipe & which galaxy, which recipe \\
+status & \texttt{ok}, \texttt{failed}, or \texttt{skipped} \\
+zred\_p50 & the redshift estimate (the median) \\
+zred\_p16, zred\_p84 & the 1-sigma range \\
+n\_bands\_fit & how many bands actually entered the fit \\
+n\_bands\_table & how many were available \\
+error & why it failed, when it did \\
+\hline
+\end{tabular}
+\end{center}
+
+If \texttt{n\_bands\_fit} is much smaller than \texttt{n\_bands\_table},
+bands were dropped --- usually for low signal-to-noise. The run's
+\texttt{manifest.json} lists exactly which ones and why.
+
+% ==========================================================
+\section{Reading the figures}
+% ==========================================================
+
+Each run writes two figures into \texttt{plots/}.
+
+\textbf{The SED figure} shows your photometry as points, with error bars,
+against the best-fitting template. Points are colored by instrument. If
+the template misses a group of points badly, that instrument may be on
+the wrong flux scale --- check the recipe.
+
+\textbf{The redshift-scan figure} shows how well each redshift fits. A
+good fit shows one clear, narrow minimum. Two things to watch for:
+
+\begin{itemize}
+  \item \textbf{Several comparable minima} --- the fit cannot decide, and
+        the quoted uncertainty understates the real one.
+  \item \textbf{The minimum at the edge of the range} --- the true
+        redshift is probably outside your \texttt{z\_min}--\texttt{z\_max}
+        window. The code warns about this in the log too. Widen the range
+        and re-run.
+\end{itemize}
+
+% ==========================================================
+\section{When something goes wrong}
+% ==========================================================
+
+Error messages name the file and say what to do. The common ones:
+
+\vspace{4pt}
+\noindent\textbf{\texttt{roster not found: ...}}\\
+The path after \texttt{-{}-roster} is wrong, or you have not run
+\texttt{sedfit roster} yet.
+
+\vspace{6pt}
+\noindent\textbf{\texttt{unknown target 'x'; the roster declares: ...}}\\
+A typo, or the galaxy was dropped during roster generation. Check
+\texttt{roster.json.report.csv} for why.
+
+\vspace{6pt}
+\noindent\textbf{\texttt{... has not been built; run: sedfit build ...}}\\
+Exactly what it says --- the message includes the command to run.
+
+\vspace{6pt}
+\noindent\textbf{\texttt{templates=... is not a directory, a .param file,
+or a packaged set}}\\
+The message lists the available set names. Check the spelling in your fit
+config.
+
+\vspace{6pt}
+\noindent\textbf{\texttt{only N fittable bands after inclusion and gates
+(min\_valid\_bands=5)}}\\
+Too few bands survived. Either the photometry is thin for that galaxy, or
+the signal-to-noise cut removed too much. Lower
+\texttt{min\_valid\_bands} in the fit config if that is scientifically
+appropriate.
+
+\vspace{6pt}
+\noindent\textbf{\texttt{chi2 minimum on the grid edge; widen the grid}}\\
+Increase \texttt{z\_max} or decrease \texttt{z\_min}.
+
+\vspace{6pt}
+\noindent\textbf{\texttt{existing run was produced by different machinery}}\\
+You reinstalled or upgraded something since that run. Add
+\texttt{-{}-force} to replace it.
+
+\vspace{6pt}
+\noindent\textbf{\texttt{no declared band}} in the roster report\\
+The file exists but holds none of the bands the campaign config expects
+from it. Usually the \texttt{provider} or the band names are wrong.
+
+\vspace{6pt}
+\noindent\textbf{A command seems to hang.}\\
+The first step of every verb opens every photometry file the roster
+declares. On a network drive or a cloud-synced folder, that can take
+minutes the first time. It is faster afterwards.
+
+\vspace{6pt}
+\noindent\textbf{An unreadable error during a batch.}\\
+Re-run the failing galaxy on its own with \texttt{-{}-workers 1}:
+
+\begin{cmd}\ttfamily
+sedfit fit -{}-roster roster.json -{}-target gal\_0007 \textbackslash\\
+\hspace*{4em}-{}-recipe plain -{}-config quick.json
+\end{cmd}
+
+Per-galaxy logs from a batch are in \texttt{batch\_logs/}.
+
+% ==========================================================
+\section{Getting more out of it}
+% ==========================================================
+
+\subsection{Several recipes at once}
+
+A recipe is one way of combining your photometry. Define several in the
+campaign config and \texttt{batch} runs them all, giving each its own
+folder. Comparing recipes is how you test whether a result depends on how
+the instruments were combined.
+
+\subsection{Comparing template sets}
+
+Copy your fit config, change \texttt{templates} and \texttt{name}, and run
+both. Because the run folder is named after the settings, the two results
+sit side by side without overwriting each other. The shipped sets are:
+
+\begin{center}
+\begin{tabular}{>{\ttfamily}l p{8.2cm}}
+\hline
+\textbf{\normalfont Set} & \textbf{What it is} \\
+\hline
+brown14\_vac\_cosmos160 & The recommended set: Brown+14 galaxies plus the
+  COSMOS templates \\
+brown14 & The Brown+14 atlas as published \\
+brown14\_vac & Brown+14, air-to-vacuum corrected \\
+ssp\_miles & FSPS simple stellar populations, MILES library \\
+ssp\_c3k\_a & The same on the C3K library \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{The central log}
+
+Every finished run appends one line to \texttt{runs.jsonl} under your data
+root. It is one JSON object per line, so it loads directly into pandas:
+
+\begin{cmd}\ttfamily
+import pandas as pd\\
+runs = pd.read\_json("sed\_fitting/runs.jsonl", lines=True)
+\end{cmd}
+
+That is the easiest way to compare many runs at once.
+
+\subsection{Where to read next}
+
+\texttt{docs/technical\_manual.md} in the repository explains how the code
+works internally --- what each module does, how the flux scaling is
+computed, and what every output field means.
+
+\end{document}
