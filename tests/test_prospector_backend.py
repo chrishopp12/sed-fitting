@@ -17,7 +17,8 @@ from sedfit.backends.prospector.obs import UJY_PER_MAGGIE, build_obs
 from sedfit.core.fitconfig import parse_fit_config, resolve_config
 from sedfit.core.policy import apply_policy
 from sedfit.core.registry import load_registry
-from sedfit.core.synth import make_spherex_tophat
+from sedfit.core.synth import (SPHEREX_TOPHAT_SAMPLES,
+                               make_spherex_tophat)
 from sedfit.core.table import COLUMNS
 
 REG = load_registry()
@@ -94,7 +95,7 @@ def test_spherex_tophats_from_core_synth() -> None:
     obs = build_obs(_cfg(), frame, _policy(frame), registry=REG)
     tophat = next(f for f in obs["filters"] if f.name == "SPHEREx_000")
     wave, thru = make_spherex_tophat(0.75, 0.02)
-    assert tophat.wavelength.size == wave.size == 27
+    assert tophat.wavelength.size == wave.size == SPHEREX_TOPHAT_SAMPLES + 2
     assert tophat.wavelength[0] == pytest.approx(wave[0], rel=1e-12)
     assert tophat.wavelength[-1] == pytest.approx(wave[-1], rel=1e-12)
 

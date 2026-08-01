@@ -185,7 +185,9 @@ may not arrive silently.
 - `data/templates/brown14_vac_cosmos160/` — **the adopted basis**: the
   129 Brown+14 spectra corrected from air to vacuum (Morton 2000/SDSS,
   applied above 2000 Å), plus the 31 COSMOS (Ilbert+09 / Polletta+07)
-  templates.
+  templates. The COSMOS files are not named `*_spec.dat`, so fitting all
+  160 needs `"template_pattern": "*.dat"`; the default pattern selects
+  the 129 Brown spectra and warns that it did.
 - `data/templates/brown14/` — the Brown et al. (2014, ApJS 212, 18)
   galaxy spectral atlas as distributed.
 - `data/templates/brown14_vac/` — the same atlas, air-to-vacuum

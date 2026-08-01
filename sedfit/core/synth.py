@@ -19,7 +19,13 @@ import numpy as np
 # Constants
 # ------------------------------------
 
-SPHEREX_TOPHAT_SAMPLES = 25
+# Samples across a SPHEREx channel's open interval. The Prospector
+# backend's exact filters integrate the source ON the filter grid, so
+# this is the quadrature resolution there, not merely the bandpass
+# shape: 25 samples aliases the ~1 A FSPS grid on the bluest channels
+# and biases their model flux high by ~0.2%. The projection is converged
+# by 101 and the cost is a 101-point trapezoid.
+SPHEREX_TOPHAT_SAMPLES = 101
 
 
 # ------------------------------------

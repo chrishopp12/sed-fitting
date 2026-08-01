@@ -42,6 +42,7 @@ from sedfit.core.fitconfig import hash_projection, resolve_config
 from sedfit.core.policy import apply_policy
 from sedfit.core.provenance import git_state, run_id as make_run_id, sha256_bytes
 from sedfit.core.runs import finalize_run, now_iso, stage_run
+from sedfit.core.synth import SPHEREX_TOPHAT_SAMPLES
 from sedfit.core.table import validate_sed_table
 
 if TYPE_CHECKING:
@@ -405,6 +406,7 @@ def run_job(
         "config_sha256_16": sha256_bytes(
             json.dumps(resolved, sort_keys=True).encode())[:16],
         "bandpass_sha256_16": registry.bandpass_hash()[:16],
+        "spherex_tophat_samples": SPHEREX_TOPHAT_SAMPLES,
         "bands_include": resolved["bands_include"],
         "err_floor": resolved["err_floor"],
         "mu_lensing": resolved["mu_lensing"],

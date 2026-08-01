@@ -149,7 +149,13 @@ against, and the build says so rather than guessing.
 
 Under `eazy`: `engine` is `quick` (no eazy-py needed) or `eazy-py`;
 `z_min`/`z_max`/`z_step` set the redshift grid; `templates` names the
-basis.
+basis; `template_pattern` picks which files in it are spectra.
+
+`template_pattern` defaults to `*_spec.dat`, which is the naming the
+Brown+14 spectra use. The adopted set adds 31 COSMOS templates named
+differently, so **fitting the whole 160-template basis needs
+`"template_pattern": "*.dat"`** — as in `fit_quick.json` here. A pattern
+that selects only part of a set raises a warning naming the count.
 
 **`templates` has no default and must be named.** The choice of template
 set moves the derived redshifts more than any other setting, so it is

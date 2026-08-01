@@ -21,6 +21,7 @@ Requirements:
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 from sedfit.core.provenance import sha256_bytes, sha256_file
@@ -43,7 +44,10 @@ def resolve_spectra(directory: str | Path, *,
     """Sorted spectrum paths in a template directory.
 
     Falls back to *.dat when the pattern matches nothing, so a generic
-    directory of two-column spectra works without configuration.
+    directory of two-column spectra works without configuration. A
+    pattern that matches only part of the directory raises a
+    UserWarning, since a basis silently missing members is a scientific
+    error rather than a preference.
     """
     directory = Path(directory).expanduser()
     spectra = sorted(directory.glob(pattern))
@@ -52,6 +56,14 @@ def resolve_spectra(directory: str | Path, *,
     if not spectra:
         raise ValueError(f"no template spectra matching {pattern!r} "
                          f"(or *.dat) in {directory}")
+
+    available = sorted(directory.glob("*.dat"))
+    if len(spectra) < len(available):
+        warnings.warn(
+            f"{directory.name}: template_pattern {pattern!r} selects "
+            f"{len(spectra)} of {len(available)} spectra; set "
+            f'"template_pattern": "*.dat" to fit the whole set',
+            stacklevel=2)
     return spectra
 
 
