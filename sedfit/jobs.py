@@ -13,7 +13,7 @@ light stack can import this module.
 
 Data products (per job):
   <target.dir>/SED/<recipe>/<backend>/<run_id[-label]>/   (runs.stage_run)
-  <data_root>/Galaxies/sed_fitting/runs.jsonl             (one row appended)
+  <roster.manifest_path>                                 (one row appended)
 
 Requirements:
   - numpy, pandas (light stack); the backend stacks at dispatch time

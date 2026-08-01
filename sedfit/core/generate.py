@@ -33,8 +33,8 @@ Notes:
     extraction's filename carries a hash over its own configuration, so
     the name differs per galaxy. A pattern matching several tables is an
     error rather than a pick.
-  - z_ref must be blank for z_ref_kind 'cluster': the roster derives it
-    from cluster_redshift and rejects a target that restates it, so the
+  - z_ref must be blank for z_ref_kind 'reference': the roster derives it
+    from reference_redshift and rejects a target that restates it, so the
     catalog is not allowed to disagree about where a redshift comes from.
 """
 
