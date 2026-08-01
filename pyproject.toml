@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sedfit"
+version = "0.1.0"
+description = "Roster-driven SED assembly and fitting: eazy-py and Prospector backends behind one shared core"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Christopher Hopp" }]
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0",       # np.trapezoid
+    "scipy",
+    "pandas",
+    "astropy",
+    "matplotlib",
+    "astro-sedpy",
+]
+
+[project.optional-dependencies]
+eazy = ["eazy"]
+prospector = [
+    "astro-prospector",
+    "fsps",
+    "dynesty",
+    "emcee",
+    "h5py",
+    "corner",
+]
+test = ["pytest"]
+dered = ["astroquery"]      # auto E(B-V) lookup; not needed when --mw-ebv is given
+
+[project.scripts]
+sedfit = "sedfit.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["sedfit*"]
+
+[tool.setuptools.package-data]
+sedfit = ["data/**"]

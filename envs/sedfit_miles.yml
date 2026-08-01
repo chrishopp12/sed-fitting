@@ -1,0 +1,24 @@
+# Merged fitting env, MILES FSPS build. The FSPS spectral library is a
+# compile-time choice in python-fsps: plain `pip install fsps` gives the
+# default MILES build. Runtime requires $SPS_HOME (the fsps checkout).
+name: sedfit_miles
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy=2.0
+  - scipy=1.16
+  - astropy=7.1
+  - matplotlib=3.10
+  - pandas=2.3
+  - h5py=3.14
+  - pytest
+  - pip
+  - pip:
+      - astro-prospector==1.4.1
+      - astro-sedpy==0.4.1
+      - fsps==0.4.7
+      - dynesty==2.1.5
+      - emcee==3.1.6
+      - corner==2.2.3
+      - eazy==0.8.6

@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "instruments": [
+    "CFHT",
+    "GALEX",
+    "JPLUS",
+    "Legacy",
+    "PS1",
+    "SDSS",
+    "SPHEREx",
+    "WISE"
+  ],
+  "spherex": {
+    "prefix": "SPHEREx_",
+    "instrument": "SPHEREx"
+  },
+  "bands": {
+    "CFHT_g": {
+      "instrument": "CFHT",
+      "sedpy": "cfht_megacam_gs_9401"
+    },
+    "CFHT_i": {
+      "instrument": "CFHT",
+      "sedpy": "cfht_megacam_is_9701"
+    },
+    "CFHT_r": {
+      "instrument": "CFHT",
+      "sedpy": "cfht_megacam_rs_9601"
+    },
+    "CFHT_u": {
+      "instrument": "CFHT",
+      "sedpy": "cfht_megacam_us_9301"
+    },
+    "CFHT_z": {
+      "instrument": "CFHT",
+      "sedpy": "cfht_megacam_zs_9801"
+    },
+    "GALEX_FUV": {
+      "instrument": "GALEX",
+      "sedpy": "galex_FUV"
+    },
+    "GALEX_NUV": {
+      "instrument": "GALEX",
+      "sedpy": "galex_NUV"
+    },
+    "JPLUS_J0378": {
+      "instrument": "JPLUS",
+      "curve": "filters/JPLUS_J0378.dat"
+    },
+    "JPLUS_J0395": {
+      "instrument": "JPLUS",
+      "curve": "filters/JPLUS_J0395.dat"
+    },
+    "JPLUS_J0410": {
+      "instrument": "JPLUS",
+      "curve": "filters/JPLUS_J0410.dat"
+    },
+    "JPLUS_J0430": {
+      "instrument": "JPLUS",
+      "curve": "filters/JPLUS_J0430.dat"
+    },
+    "JPLUS_J0515": {
+      "instrument": "JPLUS",
+      "curve": "filters/JPLUS_J0515.dat"
+    },
+    "JPLUS_J0660": {
+      "instrument": "JPLUS",
+      "curve": "filters/JPLUS_J0660.dat"
+    },
+    "JPLUS_J0861": {
+      "instrument": "JPLUS",
+      "curve": "filters/JPLUS_J0861.dat"
+    },
+    "JPLUS_gSDSS": {
+      "instrument": "JPLUS",
+      "curve": "filters/JPLUS_gSDSS.dat"
+    },
+    "JPLUS_iSDSS": {
+      "instrument": "JPLUS",
+      "curve": "filters/JPLUS_iSDSS.dat"
+    },
+    "JPLUS_rSDSS": {
+      "instrument": "JPLUS",
+      "curve": "filters/JPLUS_rSDSS.dat"
+    },
+    "JPLUS_uJAVA": {
+      "instrument": "JPLUS",
+      "curve": "filters/JPLUS_uJAVA.dat"
+    },
+    "JPLUS_zSDSS": {
+      "instrument": "JPLUS",
+      "curve": "filters/JPLUS_zSDSS.dat"
+    },
+    "Legacy_g": {
+      "instrument": "Legacy",
+      "sedpy": "bass_g"
+    },
+    "Legacy_i": {
+      "instrument": "Legacy",
+      "sedpy": "decam_i"
+    },
+    "Legacy_r": {
+      "instrument": "Legacy",
+      "sedpy": "bass_r"
+    },
+    "Legacy_z": {
+      "instrument": "Legacy",
+      "sedpy": "mzls_z"
+    },
+    "PS1_g": {
+      "instrument": "PS1",
+      "sedpy": "panstarrs_g"
+    },
+    "PS1_i": {
+      "instrument": "PS1",
+      "sedpy": "panstarrs_i"
+    },
+    "PS1_r": {
+      "instrument": "PS1",
+      "sedpy": "panstarrs_r"
+    },
+    "PS1_y": {
+      "instrument": "PS1",
+      "sedpy": "panstarrs_y"
+    },
+    "PS1_z": {
+      "instrument": "PS1",
+      "sedpy": "panstarrs_z"
+    },
+    "SDSS_g": {
+      "instrument": "SDSS",
+      "sedpy": "sdss_g0"
+    },
+    "SDSS_i": {
+      "instrument": "SDSS",
+      "sedpy": "sdss_i0"
+    },
+    "SDSS_r": {
+      "instrument": "SDSS",
+      "sedpy": "sdss_r0"
+    },
+    "SDSS_u": {
+      "instrument": "SDSS",
+      "sedpy": "sdss_u0"
+    },
+    "SDSS_z": {
+      "instrument": "SDSS",
+      "sedpy": "sdss_z0"
+    },
+    "WISE_W1": {
+      "instrument": "WISE",
+      "sedpy": "wise_w1"
+    },
+    "WISE_W2": {
+      "instrument": "WISE",
+      "sedpy": "wise_w2"
+    },
+    "WISE_W3": {
+      "instrument": "WISE",
+      "sedpy": "wise_w3"
+    },
+    "WISE_W4": {
+      "instrument": "WISE",
+      "sedpy": "wise_w4"
+    }
+  }
+}
