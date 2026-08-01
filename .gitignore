@@ -15,3 +15,12 @@ session_log*.md
 *.log
 *.out
 *.toc
+
+# Example outputs: the inputs are tracked, what a run produces is not.
+examples/roster.json
+examples/roster.json.report.csv
+examples/batch_report.csv
+examples/batch_logs/
+examples/data/sed_fitting/
+examples/data/*/SED/
+examples/data/*/Photometry/*_sed_*

@@ -1,0 +1,4 @@
+name,ra_deg,dec_deg,dir,label,z_ref_kind,z_ref,notes
+gal_0001,217.510000,56.990000,gal_0001,,spec,0.1043,red sequence
+gal_0002,217.620000,57.020000,gal_0002,,spec,0.1310,
+gal_0003,217.440000,56.950000,gal_0003,,reference,,adopts the sample redshift

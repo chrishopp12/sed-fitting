@@ -106,9 +106,22 @@ option.
 - **`manifest`** summarizes the central manifest and reports rows whose
   run directory has gone missing.
 
+## A worked example
+
+`examples/` holds a complete, runnable campaign: three synthetic
+galaxies with broadband photometry and SPHEREx spectra, the three input
+files annotated field by field, and four recipes covering every
+reference frame and every source role.
+
+    cd examples
+    sedfit run --catalog sample_catalog.csv --campaign campaign.json \
+        --config fit_quick.json
+
+Copy those three files and replace their contents with your own.
+
 ## Data model
 
-Three declarations drive everything; see `tests/` for working examples
+Three declarations drive everything; `examples/` has a working instance
 of each.
 
 - **Registry** (`sedfit/data/registry.json`): every band the package

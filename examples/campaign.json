@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "description": "Worked example: three galaxies, three broadband sources, a SPHEREx spectrum, three recipes.",
+  "sample": "example_sample",
+  "data_root": "data",
+  "reference_redshift": 0.106,
+  "manifest_path": "sed_fitting/runs.jsonl",
+  "position_frame": "icrs",
+  "position_authority": "example positions; replace with your own astrometric source",
+  "sources": {
+    "legacy": {
+      "path": "Photometry/{label}_catalog.csv",
+      "bands": [
+        "Legacy_g",
+        "Legacy_r",
+        "Legacy_z"
+      ],
+      "kind": "catalog",
+      "provider": "legacy"
+    },
+    "sdss": {
+      "path": "Photometry/{label}_catalog.csv",
+      "bands": [
+        "SDSS_u",
+        "SDSS_g",
+        "SDSS_i"
+      ],
+      "kind": "catalog",
+      "provider": "sdss"
+    },
+    "unwise": {
+      "path": "Photometry/{label}_catalog.csv",
+      "bands": [
+        "WISE_W1",
+        "WISE_W2"
+      ],
+      "kind": "catalog",
+      "provider": "unwise"
+    }
+  },
+  "spherex": {
+    "table": "Photometry/SPHEREx/table_photometry.csv",
+    "model": "sersic",
+    "provenance": "example synthetic per-visit table"
+  },
+  "recipes": {
+    "broadband_only": {
+      "description": "Broadbands at their measured levels: no spectrum, no common scale. Every source floats.",
+      "reference": "none",
+      "sources": [
+        {
+          "source": "legacy",
+          "role": "float"
+        },
+        {
+          "source": "sdss",
+          "role": "float"
+        },
+        {
+          "source": "unwise",
+          "role": "float"
+        }
+      ],
+      "spherex": null
+    },
+    "spherex_only": {
+      "description": "The SPHEREx spectrum alone, with no broadbands.",
+      "reference": "spherex",
+      "sources": [],
+      "spherex": {
+        "cuts": {},
+        "binning": {
+          "split_um": 2.6,
+          "blue_merge_dlam_um": 0.001,
+          "red_bin_resolution": 1.0
+        }
+      }
+    },
+    "stitched": {
+      "description": "The raw spectrum is the color truth; Legacy and unWISE are each rescaled onto it. SDSS is bluer than the spectrum's blue end, so it floats.",
+      "reference": "spherex",
+      "sources": [
+        {
+          "source": "legacy",
+          "role": "stitch"
+        },
+        {
+          "source": "unwise",
+          "role": "stitch"
+        },
+        {
+          "source": "sdss",
+          "role": "float"
+        }
+      ],
+      "spherex": {
+        "cuts": {},
+        "binning": {
+          "split_um": 2.6,
+          "blue_merge_dlam_um": 0.001,
+          "red_bin_resolution": 1.0
+        }
+      },
+      "min_coverage": 0.98
+    },
+    "tilted": {
+      "description": "Legacy grz and unWISE W1W2 are the color truth; the spectrum is tilted onto them by a log-linear factor between the two anchor pivots.",
+      "reference": "anchors",
+      "sources": [
+        {
+          "source": "legacy",
+          "role": "anchor"
+        },
+        {
+          "source": "unwise",
+          "role": "anchor"
+        },
+        {
+          "source": "sdss",
+          "role": "float"
+        }
+      ],
+      "spherex": {
+        "cuts": {},
+        "binning": {
+          "split_um": 2.6,
+          "blue_merge_dlam_um": 0.001,
+          "red_bin_resolution": 1.0
+        }
+      },
+      "min_coverage": 0.98
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "backend": "eazy",
+  "name": "quick_example",
+
+  "err_floor": 0.05,
+  "min_snr_broadband": 2.0,
+  "min_valid_bands": 5,
+
+  "eazy": {
+    "engine": "quick",
+    "z_min": 0.01,
+    "z_max": 0.60,
+    "z_step": 0.001,
+    "z_step_type": "linear",
+    "templates": "brown14_vac_cosmos160",
+    "tef": true,
+    "tef_scale": 1.0
+  }
+}

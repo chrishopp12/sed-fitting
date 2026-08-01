@@ -1,71 +1,98 @@
 % sedfit User Manual
 % Build with:  pdflatex sedfit_user_manual.tex   (run twice for the TOC)
+%
+% The format block below is shared verbatim with the sedphot manual.
 
 \documentclass[11pt]{article}
 
-\usepackage[margin=1in]{geometry}
+\newcommand{\manualname}{sedfit}
+\newcommand{\manualtagline}{Photometry in, redshifts out}
+\newcommand{\manualversion}{0.1.0}
+
+% ----------------------------------------------------------------
+% FORMAT. This block is shared verbatim with the sibling user
+% manual in the other repository so the two are typeset
+% identically. Change it in both or in neither.
+% ----------------------------------------------------------------
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=1in]{geometry}
 \usepackage{fancyhdr}
-\usepackage{amsmath}
 \usepackage[dvipsnames]{xcolor}
-\usepackage{graphicx}
-\usepackage{enumitem}
+\usepackage{booktabs}
 \usepackage{longtable}
 \usepackage{array}
+\usepackage{enumitem}
 \usepackage{titlesec}
 \usepackage[most]{tcolorbox}
 \usepackage[hidelinks]{hyperref}
 \usepackage{url}
 
-\definecolor{headblue}{RGB}{31,78,121}
-\definecolor{codebg}{RGB}{245,245,245}
-\definecolor{noteorange}{RGB}{180,95,20}
-\definecolor{warnred}{RGB}{160,30,30}
+% --- Palette ---
+\definecolor{slate}{RGB}{47,72,88}          % headings
+\definecolor{boxrule}{RGB}{201,204,209}     % code-block border
+\definecolor{boxfill}{RGB}{250,250,251}     % code-block fill
+\definecolor{noteaccent}{RGB}{180,95,20}
+\definecolor{warnaccent}{RGB}{160,30,30}
 
-\titleformat{\section}{\Large\bfseries\color{headblue}}{\thesection}{1em}{}
-\titleformat{\subsection}{\large\bfseries\color{headblue}}{\thesubsection}{1em}{}
+% --- Headings ---
+\titleformat{\section}{\Large\bfseries\color{slate}}{\thesection}{1em}{}
+\titleformat{\subsection}{\large\bfseries\color{slate}}{\thesubsection}{1em}{}
 
+% --- Running head ---
 \pagestyle{fancy}
 \fancyhf{}
-\lhead{\small sedfit user manual}
+\lhead{\small\manualname\ user manual}
 \rhead{\small\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
 
-% A shell command block.
+% --- Blocks ---
+% A shell/code block: light fill, thin grey border, monospaced.
 \newtcolorbox{cmd}{
-  colback=codebg, colframe=codebg, boxrule=0pt,
-  left=6pt, right=6pt, top=4pt, bottom=4pt,
-  before skip=6pt, after skip=6pt
+  colback=boxfill, colframe=boxrule, boxrule=0.4pt,
+  left=6pt, right=6pt, top=5pt, bottom=5pt,
+  before skip=8pt, after skip=8pt, breakable
 }
 
 \newtcolorbox{notebox}[1][Note]{
-  breakable, colback=noteorange!5, colframe=noteorange,
+  breakable, colback=noteaccent!5, colframe=noteaccent,
   boxrule=0.8pt, title=#1, fonttitle=\bfseries\small
 }
 
 \newtcolorbox{warnbox}[1][Careful]{
-  breakable, colback=warnred!5, colframe=warnred,
+  breakable, colback=warnaccent!5, colframe=warnaccent,
   boxrule=0.8pt, title=#1, fonttitle=\bfseries\small
 }
 
+% One-line command.
 \newcommand{\cmdline}[1]{\begin{cmd}\ttfamily #1\end{cmd}}
 
 \setlist[itemize]{itemsep=2pt, topsep=4pt}
 \setlist[enumerate]{itemsep=2pt, topsep=4pt}
 
-\title{\vspace{4cm}\Huge\textbf{sedfit}\\[0.6cm]
-       \Large User Manual\\[1.2cm]
-       \normalsize Photometry in, redshifts out}
-\author{}
-\date{\vspace{6cm}\normalsize Version 0.1.0}
+% Table helpers: booktabs rules, wrapped description columns.
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{T}[1]{>{\ttfamily\raggedright\arraybackslash}p{#1}}
+
+% --- Title page ---
+\newcommand{\manualtitlepage}{%
+  \thispagestyle{empty}
+  \vspace*{4cm}
+  \begin{center}
+    {\Huge\bfseries\manualname}\\[0.7cm]
+    {\Large User Manual}\\[1.3cm]
+    {\normalsize\manualtagline}
+  \end{center}
+  \vfill
+  \begin{center}\normalsize Version \manualversion\end{center}
+  \newpage
+  \tableofcontents
+  \newpage
+}
 
 \begin{document}
 
-\maketitle
-\thispagestyle{empty}
-\newpage
-
-\tableofcontents
-\newpage
+\manualtitlepage
 
 % ==========================================================
 \section{What this does}
@@ -297,14 +324,14 @@ Every source CSV needs four columns:
 
 \begin{center}
 \begin{tabular}{ll}
-\hline
+\toprule
 \textbf{Column} & \textbf{Meaning} \\
-\hline
+\midrule
 \texttt{band} & the filter name, e.g. \texttt{Legacy\_g} \\
 \texttt{flux\_uJy} & flux in microjansky \\
 \texttt{flux\_err\_uJy} & its uncertainty \\
 \texttt{source} & where the measurement came from \\
-\hline
+\bottomrule
 \end{tabular}
 \end{center}
 
@@ -328,16 +355,16 @@ gal\_0003,217.44,56.95,gal\_0003,reference,
 
 \begin{center}
 \begin{tabular}{ll}
-\hline
+\toprule
 \textbf{Column} & \textbf{Meaning} \\
-\hline
+\midrule
 \texttt{name} & the galaxy's name; must be unique \\
 \texttt{ra\_deg}, \texttt{dec\_deg} & position in degrees \\
 \texttt{dir} & its directory under \texttt{data\_root} (optional; defaults to the name) \\
 \texttt{z\_ref\_kind} & \texttt{spec}, \texttt{phot}, or \texttt{reference} \\
 \texttt{z\_ref} & the known redshift; \textbf{leave blank} for \texttt{reference} \\
 \texttt{label} & the filename stem (optional; defaults from the name) \\
-\hline
+\bottomrule
 \end{tabular}
 \end{center}
 
@@ -413,9 +440,9 @@ to your own directory of spectra.
 
 \begin{center}
 \begin{tabular}{>{\ttfamily}l p{10.2cm}}
-\hline
+\toprule
 \textbf{\normalfont Verb} & \textbf{What it does} \\
-\hline
+\midrule
 roster   & Reads your sample catalog and campaign config, checks what is
            actually on disk, and writes \texttt{roster.json} \\
 build    & Combines each galaxy's photometry into one fit-ready table \\
@@ -424,7 +451,7 @@ batch    & Fits every galaxy, in parallel, and writes a report \\
 run      & Does \texttt{roster}, \texttt{build} and \texttt{batch} in one command \\
 plot     & Redraws the figures for a run you already have \\
 manifest & Summarizes every run recorded so far \\
-\hline
+\bottomrule
 \end{tabular}
 \end{center}
 
@@ -630,9 +657,9 @@ section explains what the less obvious ones mean.
 \subsection{Shared by \texttt{fit}, \texttt{batch} and \texttt{run}}
 
 \begin{longtable}{>{\ttfamily}l p{9.4cm}}
-\hline
+\toprule
 \textbf{\normalfont Flag} & \textbf{Meaning} \\
-\hline
+\midrule
 \endhead
 -{}-force & Replace an existing run even though it was produced by
   different package versions. Without this, the code refuses, because the
@@ -641,30 +668,30 @@ section explains what the less obvious ones mean.
   filter curve has changed since the table was built. \\
 -{}-deredden & Fit the Milky-Way-corrected (\texttt{\_dered}) table. \\
 -{}-no-plots & Skip the figures. Faster for large sweeps. \\
-\hline
+\bottomrule
 \end{longtable}
 
 \subsection{\texttt{roster}}
 
 \begin{longtable}{>{\ttfamily}l p{9.4cm}}
-\hline
+\toprule
 \textbf{\normalfont Flag} & \textbf{Meaning} \\
-\hline
+\midrule
 \endhead
 -{}-catalog & Your sample catalog CSV. Required. \\
 -{}-campaign & Your campaign config JSON. Required. \\
 -{}-out & Where to write the roster. Defaults to \texttt{roster.json}
   beside the campaign file. \\
 -{}-dry-run & Report what would be declared; write nothing. \\
-\hline
+\bottomrule
 \end{longtable}
 
 \subsection{\texttt{build}}
 
 \begin{longtable}{>{\ttfamily}l p{9.4cm}}
-\hline
+\toprule
 \textbf{\normalfont Flag} & \textbf{Meaning} \\
-\hline
+\midrule
 \endhead
 -{}-roster & The roster JSON. Required. \\
 -{}-target & Build one galaxy; omit for all of them. \\
@@ -673,15 +700,15 @@ section explains what the less obvious ones mean.
 -{}-deredden & Also write the Milky-Way-corrected table. \\
 -{}-mw-ebv & Use one E(B--V) for every galaxy instead of looking each one
   up. Needs \texttt{-{}-deredden}. \\
-\hline
+\bottomrule
 \end{longtable}
 
 \subsection{\texttt{fit}}
 
 \begin{longtable}{>{\ttfamily}l p{9.4cm}}
-\hline
+\toprule
 \textbf{\normalfont Flag} & \textbf{Meaning} \\
-\hline
+\midrule
 \endhead
 -{}-target & Which galaxy. \\
 -{}-recipe & Which recipe's built table to fit. \\
@@ -693,15 +720,15 @@ section explains what the less obvious ones mean.
 -{}-phot-csv & Fit this photometry file instead of the built one. For
   one-off tests. \\
 -{}-dry-run & Resolve and validate; write nothing. \\
-\hline
+\bottomrule
 \end{longtable}
 
 \subsection{\texttt{batch} and \texttt{run}}
 
 \begin{longtable}{>{\ttfamily}l p{9.4cm}}
-\hline
+\toprule
 \textbf{\normalfont Flag} & \textbf{Meaning} \\
-\hline
+\midrule
 \endhead
 -{}-config & The fit config applied to every galaxy. Required. \\
 -{}-targets & A CSV whose \texttt{name} column picks the galaxies. \\
@@ -714,7 +741,7 @@ section explains what the less obvious ones mean.
 -{}-log-dir & Where to write the per-galaxy logs. \\
 -{}-stop-after-failures & Give up after this many failures.
   \texttt{0} disables the limit. \\
-\hline
+\bottomrule
 \end{longtable}
 
 \texttt{run} additionally takes \texttt{-{}-catalog}, \texttt{-{}-campaign}
@@ -754,9 +781,9 @@ results from different settings can never be confused.
 
 \begin{center}
 \begin{tabular}{>{\ttfamily}l p{9.2cm}}
-\hline
+\toprule
 \textbf{\normalfont File} & \textbf{What it holds} \\
-\hline
+\midrule
 \_sed\_<recipe>.csv & The combined photometry the fit used \\
 .provenance.json & Every input file, hashed, and every choice made \\
 config.json & The complete settings, with defaults filled in \\
@@ -767,7 +794,7 @@ arrays.npz & The redshift grid and the probability curve \\
 plots/ & The figures \\
 batch\_report.csv & One row per galaxy from a batch \\
 runs.jsonl & Every run ever, appended \\
-\hline
+\bottomrule
 \end{tabular}
 \end{center}
 
@@ -777,9 +804,9 @@ runs.jsonl & Every run ever, appended \\
 
 \begin{center}
 \begin{tabular}{>{\ttfamily}l p{8.8cm}}
-\hline
+\toprule
 \textbf{\normalfont Column} & \textbf{Meaning} \\
-\hline
+\midrule
 target, recipe & which galaxy, which recipe \\
 status & \texttt{ok}, \texttt{failed}, or \texttt{skipped} \\
 zred\_p50 & the redshift estimate (the median) \\
@@ -787,7 +814,7 @@ zred\_p16, zred\_p84 & the 1-sigma range \\
 n\_bands\_fit & how many bands actually entered the fit \\
 n\_bands\_table & how many were available \\
 error & why it failed, when it did \\
-\hline
+\bottomrule
 \end{tabular}
 \end{center}
 
@@ -902,16 +929,16 @@ sit side by side without overwriting each other. The shipped sets are:
 
 \begin{center}
 \begin{tabular}{>{\ttfamily}l p{8.2cm}}
-\hline
+\toprule
 \textbf{\normalfont Set} & \textbf{What it is} \\
-\hline
+\midrule
 brown14\_vac\_cosmos160 & The recommended set: Brown+14 galaxies plus the
   COSMOS templates \\
 brown14 & The Brown+14 atlas as published \\
 brown14\_vac & Brown+14, air-to-vacuum corrected \\
 ssp\_miles & FSPS simple stellar populations, MILES library \\
 ssp\_c3k\_a & The same on the C3K library \\
-\hline
+\bottomrule
 \end{tabular}
 \end{center}
 
@@ -926,6 +953,23 @@ runs = pd.read\_json("sed\_fitting/runs.jsonl", lines=True)
 \end{cmd}
 
 That is the easiest way to compare many runs at once.
+
+\subsection{A worked example to copy}
+
+The repository ships a complete, runnable example in \texttt{examples/}:
+three synthetic galaxies with broadband photometry and SPHEREx spectra,
+the three input files with every field annotated, and four recipes
+covering every way the package can combine instruments. Run it as-is:
+
+\begin{cmd}\ttfamily
+cd examples\\
+sedfit run -{}-catalog sample\_catalog.csv -{}-campaign campaign.json \textbackslash\\
+\hspace*{4em}-{}-config fit\_quick.json
+\end{cmd}
+
+Then copy \texttt{sample\_catalog.csv}, \texttt{campaign.json} and
+\texttt{fit\_quick.json} into your own working directory and replace
+their contents. \texttt{examples/README.md} explains every field.
 
 \subsection{Where to read next}
 

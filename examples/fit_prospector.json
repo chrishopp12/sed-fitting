@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "backend": "prospector",
+  "name": "prospector_example",
+
+  "err_floor": 0.05,
+  "min_snr_broadband": 2.0,
+  "min_valid_bands": 5,
+
+  "prospector": {
+    "stellar_library": "miles",
+    "fit_redshift": true,
+    "zred": {
+      "prior": "uniform",
+      "bounds": [0.01, 0.60]
+    },
+    "sfh": "delayed-tau",
+    "nebular": true,
+    "sampler": "dynesty",
+    "seed": 20260801
+  }
+}
