@@ -16,7 +16,7 @@ Requirements:
 Notes:
   - Resolution materializes every default, derives z_ref from the
     roster target (an explicit value that disagrees is a hard error),
-    centers a normal zred prior on the cluster redshift when mean is
+    centers a normal zred prior on the reference redshift when mean is
     null, and draws a concrete seed when seed is null.
   - hash_projection strips execution-only fields (name, n_proc) and
     merges content digests; provenance.run_id consumes its output.

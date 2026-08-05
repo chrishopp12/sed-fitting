@@ -34,13 +34,23 @@ Requires Python 3.11 or newer on Linux, macOS, or Windows.
     pip install -e .                 # core: assembly, quick engine, plots
     pip install -e ".[eazy]"         # + the official eazy-py engine
     pip install -e ".[prospector]"   # + Prospector/FSPS/dynesty/emcee
+    pip install -e ".[test]"         # + pytest
+    pip install -e ".[dered]"        # + astroquery, for the E(B-V) lookup
 
-Ready-made conda environments live in `envs/`. Prospector fitting needs
-an FSPS data checkout at `$SPS_HOME`:
+`--deredden` without `--mw-ebv` needs the `dered` extra; `astroquery` is
+in neither conda environment.
+
+Ready-made conda environments live in `envs/`. They build the stack
+around the package but **do not install the package itself** — follow
+`conda env create` with `pip install -e .` or you get `sedfit: command
+not found`. Prospector fitting needs an FSPS data checkout at
+`$SPS_HOME`:
 
     git clone https://github.com/cconroy20/fsps ~/fsps
     export SPS_HOME=~/fsps
     conda env create -f envs/sedfit_miles.yml
+    conda activate sedfit_miles
+    pip install -e .
 
 FSPS compiles from Fortran source, so the Prospector extra is best
 supported on Linux and macOS. The core install and the eazy backends
@@ -55,8 +65,10 @@ python-fsps installation docs for library selection via `FFLAGS`):
 
     conda env create -f envs/sedfit_c3k.yml
     conda activate sedfit_c3k
+    conda install -c conda-forge compilers
     FFLAGS="-DMILES=0 -DC3K=1" pip install --force-reinstall \
         --no-cache-dir --no-binary fsps fsps==0.4.7
+    pip install -e .
 
 Verify with `python -c "import fsps;
 print(fsps.StellarPopulation(zcontinuous=1).libraries)"` — the second
@@ -86,8 +98,9 @@ option.
   generated artifact — edit the catalog or the campaign, not the roster.
 - **`build`** writes `<target.dir>/Photometry/<prefix>_sed_<recipe>.csv`
   plus a provenance sidecar. With `--deredden` it writes the
-  Milky-Way-corrected `..._dered.csv` alongside, using a per-target SFD
-  lookup unless `--mw-ebv` supplies one value.
+  Milky-Way-corrected `..._dered.csv` *instead of* the as-measured table
+  — one build writes one table — using a per-target SFD lookup unless
+  `--mw-ebv` supplies one value.
 - **`fit`** locates that table, cross-checks the sidecar against the
   live band registry, applies the shared data policy (inclusion, S/N
   gate, one clamped error floor), and writes a self-contained run
@@ -99,9 +112,13 @@ option.
   across a worker pool, resuming on `run_id` so an interrupted campaign
   restarts where it stopped. It writes a per-job report CSV and
   per-job logs, and isolates failures so one bad target does not stop
-  the sweep. `--build` rebuilds each table first.
+  the sweep. `--build` rebuilds each table first; `--build --deredden`
+  builds the Milky-Way-corrected tables, per-target SFD unless
+  `--mw-ebv` supplies one value.
 - **`run`** chains `roster`, `build` and `batch` in one call, reporting
-  each stage separately.
+  the roster and the build-plus-fit stage separately. It always
+  rebuilds and always resumes: it has no `--build`, `--no-resume` or
+  `--dry-run`.
 - **`plot`** re-renders the figures from a run directory's own contents.
 - **`manifest`** summarizes the central manifest and reports rows whose
   run directory has gone missing.

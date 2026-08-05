@@ -33,7 +33,7 @@ gal_0001,217.510000,56.990000,gal_0001,,spec,0.1043,red sequence
 
 | Column | Required | Meaning |
 |---|---|---|
-| `name` | yes | the galaxy's name, unique within the file |
+| `name` | yes | the galaxy's name, unique within the file (`target` also accepted) |
 | `ra_deg`, `dec_deg` | yes | position in degrees (`ra`/`dec` also accepted) |
 | `z_ref_kind` | yes | `spec`, `phot`, or `reference` |
 | `z_ref` | see below | the comparison redshift |
@@ -70,7 +70,17 @@ files.
 | `recipes` | yes | how to combine them |
 | `reference_redshift` | only if some target uses `z_ref_kind: reference` | the sample-wide redshift |
 | `manifest_path` | no | the central run log, relative to `data_root`. Default `sed_fitting/runs.jsonl` |
-| `spherex` | no | the per-visit spectrophotometry table |
+| `spherex` | no | the per-visit spectrophotometry table: `{table, model, provenance}`, all three required if present. `table` is a glob pattern; `model` is `psf` or `sersic` |
+| `description` | no | free text, copied into the roster |
+| `position_frame` | no | the astrometric frame. Default and only legal value `icrs` |
+
+`reference_redshift` becomes required the moment any catalog row uses
+`z_ref_kind: reference` — and **generation does not check it**. The
+roster writes cleanly and the *next* verb fails with `z_ref_kind
+'reference' requires the roster to declare reference_redshift`. Several
+enums behave the same way (a source's `kind`, `spherex.model`,
+`position_frame`): they are validated when the roster loads, not when
+the campaign does.
 
 **A source** is one photometry file plus the bands you expect from it:
 
@@ -119,6 +129,12 @@ Each source in a recipe takes a **role**:
 - **`float`** — carried through untouched. Legal everywhere, and the only
   role legal under `reference: none`.
 
+A recipe also takes an optional `description` and `min_coverage`
+(default 0.98, in (0, 1]) — the fraction of a band the spectrum must
+cover before that band can carry a stitch scale. A source entry may
+carry an optional `bands` subset restricting which of that source's
+declared bands this recipe consumes.
+
 A source can only stitch if it actually overlaps the reference. SDSS
 floats in `stitched` and `tilted` because SDSS *ugi* lies blueward of
 SPHEREx's 0.75 µm blue end — a stitch there would have nothing to measure
@@ -133,23 +149,42 @@ against, and the build says so rather than guessing.
   "name": "quick_example",
   "err_floor": 0.05,
   "eazy": { "engine": "quick", "z_min": 0.01, "z_max": 0.60,
-            "z_step": 0.001, "templates": "brown14_vac_cosmos160" }
+            "z_step": 0.001, "templates": "brown14_vac_cosmos160",
+            "template_pattern": "*.dat" }
 }
 ```
 
+(The real file also sets `min_snr_broadband`, `min_valid_bands`, `tef`,
+`tef_scale` and `z_step_type` explicitly, all at their defaults — read
+it alongside this.)
+
 | Key | Default | Meaning |
 |---|---|---|
-| `backend` | — | `eazy` or `prospector` |
-| `name` | — | names the run directory and the figures |
-| `err_floor` | 0.05 | fractional error floor, added in quadrature |
+| `schema_version` | — | **required**; `2` |
+| `backend` | — | **required**; `eazy` or `prospector` |
+| `name` | — | **required**; names the run directory and the figures |
+| `err_floor` | 0.05 | fractional error floor, added in quadrature. May be a per-instrument map with an optional `"default"` key |
 | `min_snr_broadband` | 2.0 | drop broadbands below this signal-to-noise |
 | `min_valid_bands` | 5 | fail the fit below this many surviving bands |
 | `mu_lensing` | 1.0 | divide fluxes by this magnification |
-| `bands_include` | all | restrict the fit to a list of bands |
+| `bands_include` | `null` (every band) | instrument names and/or band names; an entry matching nothing is an error |
+| `z_ref` | `null` | filled from the roster target; an explicit value that disagrees is an error |
+| `qa_gates` | `null` | map of `qa_flags` token → `{min, max}` |
 
 Under `eazy`: `engine` is `quick` (no eazy-py needed) or `eazy-py`;
 `z_min`/`z_max`/`z_step` set the redshift grid; `templates` names the
 basis; `template_pattern` picks which files in it are spectra.
+
+**The grid defaults are narrow and sample-specific**: `z_min` 0.05,
+`z_max` 0.16, `z_step` 0.001. A config that omits them fits that window
+and says nothing about it, so set them for your own sample as
+`fit_quick.json` does. The other `eazy` defaults: `mode` `combo`
+(`single` is what writes `singles.csv`), `z_step_type` `linear`,
+`z_fixed` `null`, `tef` `true`, `tef_file` `null`, `tef_scale` `1.0`,
+`tef_lnp` `true`, `prior` `false`, `fitter` `nnls`, `n_proc` `4`,
+`extra_params` `{}`, `save_zcoeffs` `false`. Under `engine: quick`, a
+`prior`, a non-`nnls` `fitter` and any `extra_params` are errors that
+name `engine: eazy-py` as the remedy.
 
 `template_pattern` defaults to `*_spec.dat`, which is the naming the
 Brown+14 spectra use. The adopted set adds 31 COSMOS templates named
@@ -164,6 +199,17 @@ a path to your own directory of two-column spectra.
 
 `fit_prospector.json` is the equivalent for the Prospector backend, which
 needs the `prospector` extra and an FSPS checkout at `$SPS_HOME`.
+
+The `prospector` block has 31 keys and only one required
+(`stellar_library`), but its shape is conditional, so the minimal config
+that implies does **not** load. `fit_redshift` defaults `true`, and
+`true` requires a `zred` block — start from `fit_prospector.json` rather
+than from scratch. The other three conditionals: `nebular` off requires
+the three `gas_logu_*` keys to stay null; `sfh: continuity` requires the
+parametric keys (`tau_*`, `tage_*`, `tie_tage_to_tuniv`) to stay null
+and a parametric `sfh` inverts that; and whichever of `dynesty` /
+`emcee` the `sampler` does not select must be null. Full key list and
+defaults are in `docs/technical_manual.md` §4.3.
 
 ## What the example produces
 
@@ -181,8 +227,10 @@ examples/
                 gal_0001_sed_tilted.provenance.json
                 SPHEREx/table_photometry.csv  the input spectrum
             SED/tilted/eazy/<run_id>-quick_example/
-                config.json  phot.csv  manifest.json
-                summary.csv  arrays.npz  plots/
+                config.json  phot.csv  phot.provenance.json
+                manifest.json  summary.csv  arrays.npz
+                catalog.csv  template_error.dat  templates.param
+                engine.info  plots/
         sed_fitting/runs.jsonl     every run, appended
 ```
 

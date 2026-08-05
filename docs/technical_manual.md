@@ -34,7 +34,7 @@ Everything is a subcommand of one CLI (`sedfit/__main__.py`):
 |---|---|---|
 | `roster` | `core.generate.generate_roster` + `write_roster` | `roster.json` + `roster.json.report.csv` |
 | `build` | `core.build.build_target` + `write_build` | `<prefix>_sed_<recipe>.csv` + sidecar |
-| `fit` | `jobs.run_job` | one run directory + one manifest row |
+| `fit` | `jobs.run_job` (`run_jobs` under `--jobs`) | one run directory + one manifest row per job |
 | `batch` | `batch.run_batch` | many run directories + a report CSV |
 | `run` | `__main__._run` | `roster`, then `batch --build` (each job builds its own table) |
 | `plot` | backend `generate_plots` | re-rendered figures |
@@ -50,6 +50,11 @@ unknown keys are errors, not warnings:
 
 Fluxes are microjansky throughout, AB. Errors are statistical as they
 arrive; the fitting-time error floor is applied once, in one place.
+
+**Exit status.** `batch` exits 1 if any job failed or the batch aborted
+on `--stop-after-failures`; `manifest` exits 1 if the central log has a
+torn line or any run directory is missing; `run` exits 1 if either stage
+failed. `roster`, `build`, `fit` and `plot` exit 0 unless they raise.
 
 The load-bearing idea is **run identity**. A run directory is named by a
 hash over the resolved configuration, the photometry bytes, and the
@@ -73,7 +78,7 @@ Read this before the deep sections; several words are overloaded.
 | **generation report** | `core/generate.py` | `roster.json.report.csv`, one row per (target, source) with status `kept` / `partial` / `dropped` and the reason. The artifact to read after generating. |
 | **target** | `core/roster.py` | One galaxy: a position, a reference redshift, a directory, an optional SPHEREx table, and named sources. |
 | **source** | `core/roster.py` | One declared photometry file for one target, plus the bands it is expected to supply, its `kind` (`catalog` or `measured`), and the provider whose prefix its rows must carry. |
-| **provider / source prefix** | `core/sources.py` | A provider token (`legacy`, `jplus`, `aperture`, …) maps to a string prefix that every one of its rows carries in the table's `source` column. This is what lets two providers supply the same band from one file. |
+| **provider / source prefix** | `core/sources.py` | A provider token (`legacy`, `jplus`, `aperture`, …) maps to a string prefix that every one of its rows carries in the *source CSV's* `source` column. This is what lets two providers supply the same band from one file. |
 | **recipe** | `core/recipe.py` | How to assemble one SED table: a reference frame, a role for each source, and the SPHEREx handling. |
 
 ### Assembly
@@ -105,10 +110,10 @@ Read this before the deep sections; several words are overloaded.
 | Word | Senses |
 |---|---|
 | **reference** | (1) A recipe's **reference frame**. (2) The sample's **`reference_redshift`**, adopted by targets of `z_ref_kind: reference`. (3) The **anchor band** inside `stitch.measure_scale` (`info['anchor']`), the band a group's scale is measured in — a different sense of *anchor* from the recipe role. |
-| **source** | (1) A roster **source** — one declared file. (2) The SED table's **`source` column**, a provenance string. (3) The `sedphot` `source` prefix vocabulary. |
+| **source** | (1) A roster **source** — one declared file. (2) The **source CSV's `source` column**, a provenance string carrying the provider prefix; it is consumed at build time and does **not** survive into the built SED table (§5.1), which records it in the sidecar's `source_strings` instead. (3) The `sedphot` `source` prefix vocabulary. |
 | **scale** | An instrument group's achromatic factor (`stitch`), never the tilt. |
 | **prefix** | (1) A target's **filename stem** (`Target.prefix`). (2) A provider's **source-column prefix** (`sources.SOURCE_PREFIXES`). Unrelated. |
-| **manifest** | (1) The **central** append-only `runs.jsonl`. (2) The **per-run** `manifest.json`, one row, the same schema. |
+| **manifest** | (1) The **central** append-only log at the roster's `manifest_path` — relative to `data_root`, default `sed_fitting/runs.jsonl`. (2) The **per-run** `manifest.json`, one row, the same schema. |
 
 ---
 
@@ -125,11 +130,19 @@ CLI: sedfit build --roster ROSTER --target X --recipe R
   +-- core.build.check_applicability(recipe, target)
   |     recipe's sources all declared by the target; SPHEREx agreement
   |
-  +-- core.build.build_target(roster, target, recipe, registry=..., mw_ebv=...)
+  +-- core.build.build_target(roster, target_name, recipe_name, *,
+  |                            registry=..., mw_ebv=...)
         |
         1. sources.select_rows        per recipe entry: the declared bands,
         |                             selected by provider prefix, exactly
         |                             one row each
+        1b. sources.check_position    once per distinct file: the table's
+        |                             target_ra/target_dec against the roster
+        |                             position; a table carrying neither
+        |                             column warns rather than passing
+        1c. build._check_dered_states consumed rows must share one extinction
+        |                             state, and a dereddening build refuses
+        |                             rows that are already dereddened
         2. spherex.ingest             visit table -> quality cuts -> binning
         |                             -> a channel spectrum + counts
         3. dered.deredden             (only when mw_ebv is not None) per
@@ -159,7 +172,7 @@ the result; `--dry-run` stops after `check_applicability`.
 ### 3.2 A fit, end to end
 
 ```
-CLI: sedfit fit --roster R --target X --recipe R --config CFG
+CLI: sedfit fit --roster ROSTER --target X --recipe R --config CFG
   |
   fitconfig.load_fit_config       <- the CLI or the batch worker parses
   |                                  the config; unknown keys are errors
@@ -187,7 +200,9 @@ CLI: sedfit fit --roster R --target X --recipe R --config CFG
   |   |                           os.replace it into place atomically
   |   +-- backend dispatch
   |         eazy       -> quick.run_quick | fitting.run_official
-  |         prospector -> model.build_model + build_sps -> fitting.run_sampler
+  |         prospector -> obs.build_obs + model.build_model
+  |                       + attach_norm_masks -> fitting.run_sampler
+  |                       -> save_results          (the SPS was built above)
   |   +-- auto-plots              eazy: plots.generate_plots
   |                               prospector: plots.plot_run
   |                               failures here are reported, not fatal
@@ -219,6 +234,12 @@ with that id whose own `manifest.json` says `status: ok`, and skips the
 job if it finds one — **before** any staging, so a resumed batch never
 touches a finished run.
 
+`--mw-ebv` is legal only with both `--build` and `--deredden`, checked
+before any job runs. When both are set, `run_batch` resolves `E(B-V)`
+once per *target* in the parent process — not per job, and not in the
+workers — so every recipe a target runs under gets the same value and
+the SFD service sees one query per galaxy.
+
 ### 3.4 Tracing a flux to a fitted redshift
 
 1. A row in one of the target's declared source CSVs — the path comes
@@ -228,8 +249,9 @@ touches a finished run.
 2. Possibly multiplied by a dereddening factor (`dered.band_factor`).
 3. Possibly multiplied by its instrument group's scale
    (`stitch.measure_scale`), or the spectrum tilted onto the anchors.
-4. Written to `<prefix>_sed_<recipe>.csv` as one row of `band`,
-   `flux_uJy`, `flux_err_uJy`.
+4. Written to `<target.dir>/Photometry/<prefix>_sed_<recipe>.csv`
+   (`build.SED_TABLE_SUBDIR`) as one row of `band`, `flux_uJy`,
+   `flux_err_uJy`.
 5. Copied byte-for-byte into the run directory as `phot.csv`.
 6. Divided by `mu_lensing`, then the error floor added in quadrature
    (`policy.apply_policy`).
@@ -272,6 +294,11 @@ declarations are true of the tree right now.
 deprecated spellings of `sample`, `reference_redshift`, and `reference`.
 Declaring both spellings of one field is an error.
 
+`prefix` is a **required** target key — it is the filename stem every
+built table and sidecar is named from. `manifest_path` must be relative;
+an absolute path is a hard error. `aperture_arcsec` is accepted and
+parsed onto `Target`, but nothing in the package reads it.
+
 #### `generate.py`
 The `roster` verb. Joins a sample catalog with a campaign config and
 resolves both against the tree. Its rule is that generation declares only
@@ -289,6 +316,28 @@ The SPHEREx table is matched by **glob pattern** rather than an exact
 name, and a pattern matching more than one table is a hard error rather
 than a pick. It is the one place generation refuses to guess.
 
+Campaign keys. Required: `schema_version`, `sample`, `data_root`,
+`position_authority`, `sources`, `recipes`. Optional: `description`,
+`reference_redshift`, `manifest_path`, `position_frame` (default and
+only legal value `icrs`), `spherex`. `cluster` and `cluster_redshift`
+are accepted as deprecated spellings of `sample` and
+`reference_redshift`.
+
+**`reference_redshift` becomes required the moment any catalog row uses
+`z_ref_kind: reference`, and generation does not check it** — the roster
+writes cleanly and the *next* verb raises `z_ref_kind 'reference'
+requires the roster to declare reference_redshift`. The same deferral
+applies to several enums: `load_campaign` does not validate a source's
+`kind`, the campaign `spherex.model`, or `position_frame`, all of which
+are checked at roster load instead.
+
+**Two different `spherex` blocks.** The campaign's top-level one is
+`{table, model, provenance}`, all three required, where `table` is a
+glob pattern (or list) with `{name}`/`{label}`/`{prefix}` substitution
+and `model` is `psf` or `sersic`. A *recipe's* `spherex` is the
+tri-state `{cuts, binning}` block described under `recipe.py`. They
+share a name and nothing else.
+
 #### `recipe.py`
 Parses and validates one recipe. Checks the frame model: `anchor` roles
 are legal only under `reference: anchors`, which requires one or two of
@@ -299,7 +348,15 @@ on implicitly-consumed bands is enforced at build time by
 
 The `spherex` block is tri-state: **absent** (the build hard-errors when
 the target declares a SPHEREx table), **null** (deliberate exclusion), or
-a block of cuts and binning.
+a block of cuts and binning — `cuts` being `fit_ql_max` (null),
+`flags_reject` (`DEFAULT_FLAGS_REJECT`) and `drop_local_bkg` (false),
+and `binning` being `split_um` (null), `blue_merge_dlam_um` (0.001) and
+`red_bin_resolution` (1.0).
+
+Recipe keys. Required: `reference`, `sources`. Optional: `description`
+and `min_coverage` (default 0.98, in (0, 1]). A source entry takes
+`source` and `role`, plus an optional `bands` subset restricting which
+of that source's declared bands this recipe consumes.
 
 #### `sources.py`
 The provider-prefix vocabulary and the row selection built on it.
@@ -311,8 +368,15 @@ unambiguous.
 `select_rows` is the error-raising selection used at build time;
 `match_counts` is the counting version used at roster load. `check_position`
 cross-checks a table's `target_ra`/`target_dec` against the roster
-position, and a table carrying neither column raises a `UserWarning`
-rather than passing silently.
+position within 0.5", and a table carrying neither column raises a
+`UserWarning` rather than passing silently.
+
+`REQUIRED_COLUMNS` is `band`, `flux_uJy`, `flux_err_uJy`, `source`.
+Three further columns are consumed when present: `target_ra`/`target_dec`
+for the position check, and `flags` — on `aperture` and `sersic`
+provider rows only — which becomes the SED table's `qa_flags` and is
+what `qa_gates` gates on. Flux and error validity is enforced on
+**selected rows only**, so a malformed row nothing selects is inert.
 
 #### `validate.py`
 `require_keys`, `require_enum`, `apply_aliases`, `describe_columns`. The
@@ -348,6 +412,14 @@ the spectrum does not cover are dropped before integrating, so an
 **interior** gap is bridged by the trapezoid rule and counts as covered
 — coverage measures the ends, not holes.
 
+`SPHEREX_TOPHAT_SAMPLES` (101) is the **quadrature resolution**, not
+merely the bandpass shape. The Prospector backend's exact filters
+integrate the source *on* the filter grid, so an under-resolved tophat
+aliases the ~1 Å FSPS grid: at 25 samples the two bluest channels' model
+fluxes ran +0.2% high. It is a module constant, not a config key, and it
+is **not** in `run_id` — so the manifest row records the value that ran
+(§5.4).
+
 #### `stitch.py`
 `measure_scale` returns one instrument group's achromatic factor. A band
 is eligible if it clears `min_coverage` — a per-recipe key, default 0.98
@@ -380,7 +452,7 @@ from IRSA, which is what the curve above expects.
 The SED table schema (§5.1) and its validator. Validation runs on every
 read and is the authoritative unknown-band and error check.
 
-### 4.3 Fitting (`sedfit/core/`, `sedfit/jobs.py`)
+### 4.3 Fitting and orchestration (`sedfit/core/`, `sedfit/jobs.py`, `sedfit/batch.py`, `sedfit/__main__.py`)
 
 #### `policy.py`
 The one implementation of everything between the table and a backend.
@@ -411,6 +483,60 @@ content digests.
 An eazy config **must** name its `templates`. There is no default,
 because the template basis is the dominant systematic a fit carries.
 
+**Top level.** Required: `schema_version` (`2`), `backend`, `name`.
+Optional, with defaults: `bands_include` `null` (accepts registry
+*instrument* names as well as band names; an entry matching no band in
+the table is a hard error), `min_valid_bands` `5`, `min_snr_broadband`
+`2.0`, `err_floor` `0.05` (a scalar, or a per-instrument map with an
+optional `"default"` key), `mu_lensing` `1.0`, `z_ref` `null` (filled
+from the roster target; an explicit value that disagrees is a hard
+error), `qa_gates` `null` (a map of `qa_flags` token → `{min, max}`,
+tokens restricted to `policy.QA_GATE_TOKENS`).
+
+**The `eazy` block.** `templates` is required. The rest default:
+`engine` `quick`, `mode` `combo` (`single` is what writes
+`singles.csv`), **`z_min` `0.05`, `z_max` `0.16`**, `z_step` `0.001`,
+`z_step_type` `linear`, `z_fixed` `null` (must lie strictly inside the
+grid), `template_pattern` `*_spec.dat`, `tef` `true`, `tef_file` `null`,
+`tef_scale` `1.0`, `tef_lnp` `true`, `prior` `false`, `prior_file`
+`null`, `prior_filter` `null`, `fitter` `nnls`, `n_proc` `4`,
+`extra_params` `{}`, `save_zcoeffs` `false`. Under `engine: quick`, a
+`prior`, a non-`nnls` `fitter` and any `extra_params` are hard errors
+naming `engine: eazy-py` as the remedy.
+
+The redshift-grid defaults are a **narrow, sample-specific window**. A
+config that omits them fits 0.05–0.16 and says nothing about it; set
+them deliberately for any other sample.
+
+**The `prospector` block.** `stellar_library` is the only required key,
+but the shape is conditional in four places, and the minimal config that
+suggests — `{"stellar_library": "miles"}` — does **not** load:
+`fit_redshift` defaults `true`, and `true` requires a `zred` block
+(`prior` `uniform`|`normal`, `mean`, `sigma`, `bounds` `[0.0, 1.0]`; a
+`normal` prior needs a positive `sigma`, and a null `mean` is centered
+on the roster's `reference_redshift` at resolve time). The other three
+conditionals: `nebular` off requires `gas_logu_free`/`gas_logu_prior`/
+`gas_logu_init` to stay null and on defaults them to `false` /
+`[-4.0, -1.0]` / `-2.0`; `sfh: continuity` defaults `n_agebins` to `7`
+and requires the parametric keys (`tie_tage_to_tuniv`, `tau_range`,
+`tau_init`, `tage_range`, `tage_init`, `tage_tuniv_init`) to stay null,
+while a parametric `sfh` inverts that; and the unselected `sampler`
+block of `dynesty` / `emcee` must be null.
+
+The remaining defaults: `sfh` `continuity`, `nebular` `false`, `agn`
+`false`, `dust_emission` `false`, `free_norm_instruments` `[]`,
+`free_norm_prior` `[0.1, 10.0]`, `exact_filters` `true`, `sampler`
+`dynesty`, `dynesty` `{}`, `seed` `null`, `mass_range`
+`[1.0e10, 1.0e13]`, `mass_init` `3.0e11`, `logzsol_prior`
+`[0.0, 0.3, -1.0, 0.5]`, `logzsol_prior_type` `clipped_normal`
+(`uniform` takes two values, `clipped_normal` four), `logzsol_init`
+`0.0`, `dust2_prior` `[0.15, 0.2, 0.0, 1.0]`, `dust2_prior_type`
+`clipped_normal`, `dust2_init` `0.15`.
+
+A null `seed` draws 31 bits from `SystemRandom` at resolve time and
+records the draw — which is why an unseeded dry run reports a `run_id`
+the real run will not use (§7).
+
 #### `provenance.py`
 `canonical_json` and `run_id`, plus file and byte digests and
 `git_state`. The canonical form is version-stable: changing it changes
@@ -421,7 +547,9 @@ every run identity. `git_state`'s `dirty` comes from `git status
 Run-directory lifecycle and the central manifest. `stage_run` builds the
 skeleton under a temporary name and `os.replace`s it into place;
 `finalize_run` writes the per-run `manifest.json` and appends one locked
-line to the central `runs.jsonl`. The lock is `fcntl.flock` on POSIX and
+line to the central manifest at `roster.manifest_path` — the campaign's
+`manifest_path`, resolved against `data_root`, defaulting to
+`sed_fitting/runs.jsonl`. The lock is `fcntl.flock` on POSIX and
 `msvcrt.locking` on Windows, taken on a separate descriptor so the
 append can use its own.
 
@@ -504,7 +632,9 @@ the grid start (eazy-py 0.8.6).
 quantizes onto its own grid; for ordinary broadbands the two projections
 agree, but the difference matters for narrow SPHEREx channels.
 `make_exact` is applied both before and after `fix_obs`, which may
-rebuild the filter list.
+rebuild the filter list. Both calls are gated on the config's
+`prospector.exact_filters` (default `true`); turning it off restores
+sedpy's own projection.
 
 **The `depends_on` ordering.** prospect propagates `depends_on` in dict
 order, so `agebins` (derived from `zred`) must precede `mass` (derived
@@ -520,8 +650,14 @@ environment is a silent scientific error unless caught here.
 `plots.py` holds the unified SED figure and its axis conventions;
 producers live in the backends and hand it plain arrays. `lines.py`
 carries the line catalogs — all vacuum, ordered by wavelength — and the
-matplotlib annotation helpers. `ew.py` measures equivalent widths
-against a two-sided fitted continuum.
+matplotlib annotation helpers; `load_emission_lines` refines the curated
+emission wavelengths against the packaged FSPS `emlines_info.dat`.
+`ew.py` measures equivalent widths against a two-sided fitted continuum.
+
+`ew.compute_ew_batch` and `ew.print_ew_table` have **no caller inside
+this package**. They serve the posterior-spectra figure suite in the
+standalone `prospector_sed_fitting` engine, which is kept live for
+exactly that reason.
 
 ---
 
@@ -529,7 +665,10 @@ against a two-sided fitted continuum.
 
 ### 5.1 The SED table schema
 
-Eight columns, defined in `core/table.py`.
+`<target.dir>/Photometry/<prefix>_sed_<recipe>[_dered].csv`. Eight
+columns, defined in `core/table.py`. Note there is **no `source`
+column**: the provider strings are consumed at build time and recorded
+in the sidecar's `source_strings`.
 
 | # | Column | Contract |
 |---|---|---|
@@ -551,13 +690,14 @@ bin's statistics for the fit policy and the provenance record.
 table, known bands, finite fluxes, **finite and strictly positive**
 errors, no duplicate bands, all four SPHEREx-only columns empty on
 broadband rows, positive `wave_um`/`bandwidth_um` and non-negative
-`scatter_uJy` and `n_exp >= 1` on SPHEREx rows, an empty `qa_flags` on
+`scatter_uJy` and an **integral** `n_exp >= 1` on SPHEREx rows, an empty `qa_flags` on
 SPHEREx rows, and a parseable `;`-joined `key=value` string where
 `qa_flags` is present.
 
 ### 5.2 The build sidecar
 
-`<prefix>_sed_<recipe>.provenance.json`, written beside every table:
+`<prefix>_sed_<recipe>[_dered].provenance.json`, written beside every
+table and named from it, so a dereddening build produces its own pair:
 
 ```
 builder, package_version, git, generated
@@ -567,6 +707,7 @@ registry     {path, bandpass_sha256_16, bands: {band: hash}}
 sources      [{source, role, path, sha256_16, kind, provider,
                bands, source_strings}, ...]
 spherex      {table, sha256_16, model, provenance, cuts, binning, counts}
+             or null
 dered        {ebv, law, r_v, broadband_A_mag, spherex_A_mag}  or null
 reference    {kind, anchors, tilt: {blue, red, c_blue, c_red,
               factor_min, factor_max} or null}
@@ -591,7 +732,9 @@ detected — rebuild deliberately when the photometry moves.
     phot.csv                the photometry, byte-for-byte
     phot.provenance.json    the build sidecar, copied
     manifest.json           this run's manifest row
-    plots/                  the figures
+    plots/                  eazy:       sed_<name>.png, zscan_<name>.png,
+    |                                   sed_fixed_<name>.png (z_fixed only)
+    |                       prospector: corner.png, trace.png, map_sed.png
     # both eazy engines add:
     catalog.csv  template_error.dat  summary.csv  arrays.npz
     templates.param         directory-mode template sets only
@@ -612,15 +755,35 @@ rehydrates a `FitResult` from `arrays.npz` — but the Prospector path
 rebuilds the model and the SPS object, so it needs the Prospector/FSPS
 stack and a valid `$SPS_HOME`.
 
+The `<backend>` level is the **backend** (`eazy` / `prospector`), not
+the engine: `quick` and `eazy-py` both write into `eazy/` and are told
+apart by `engine.info` and the manifest's `engine` field.
+
+**The eazy tables.** `summary.csv` carries `id, n_bands, z_ml, z_chi2,
+chi2_best, n_active, redchi2, z025, z160, z500, z840, z975`, plus
+`z_fixed, chi2_fixed, n_active_fixed, redchi2_fixed` under `z_fixed` and
+`single_template, z_single, chi2_single` in single mode. `singles.csv`
+carries `id, template, z_best, chi2_min, ampl`; `catalog.csv` carries
+`id` and an `f_<band>` / `e_<band>` pair per band.
+
+**One rename to know.** The percentiles are `z160 / z500 / z840` in
+`summary.csv` and `zred_p16 / zred_p50 / zred_p84` in the manifest row
+and the batch report — the same numbers under two vocabularies, mapped
+in `jobs.py`. Searching a `summary.csv` for `zred_p50` finds nothing.
+
 ### 5.4 The manifest row
 
 One JSON object per finalized run, written both to `manifest.json` and
-appended to the central `runs.jsonl`:
+appended to the central manifest at `roster.manifest_path` (relative to
+`data_root`, default `sed_fitting/runs.jsonl`). `path` is the run
+directory **relative to `data_root`**, which is how `sedfit manifest`
+rejoins it:
 
 ```
 run_id, path, written, target, recipe, backend, engine, sampler, seed
 package_version, git_rev, git_dirty, fsps_libraries, versions
 phot_sha256_16, config_sha256_16, bandpass_sha256_16
+spherex_tophat_samples
 bands_include, err_floor, mu_lensing, z_ref
 templates      {n, set_sha256_16, source}        (eazy)
 status         "ok" | "failed"
@@ -652,12 +815,47 @@ digests.
 **Out** of the hash: `name`, `n_proc`, `templates`, `template_pattern`,
 `tef_file` — these locate curves or tune execution. Identical curves
 under any path therefore share one identity, which is what lets a config
-name a packaged template set rather than an absolute path.
+name a packaged template set rather than an absolute path. Note the
+asymmetry on `template_pattern`: the pattern string is stripped, but the
+files it resolves to are hashed, so changing it still changes `run_id`
+whenever it changes *which* spectra are selected.
 
 **Separate** from the hash: the machinery stamp. Two runs with the same
 `run_id` and different package versions are the same science computed by
 different software; `stage_run` reports that and requires `force` to
-replace.
+replace. Also separate: `synth.SPHEREX_TOPHAT_SAMPLES`, a module
+constant rather than a config field, which changes the fluxes without
+changing the identity — hence its manifest row entry.
+
+### 5.6 The batch report
+
+`batch_report.csv` beside the roster by default, one row per **job** —
+one target under one recipe, not one per galaxy. Fourteen columns,
+`batch.REPORT_COLUMNS`:
+
+```
+target, recipe, backend, status, stage, run_id, path, seconds
+zred_p50, zred_p16, zred_p84, n_bands_fit, n_bands_table, error
+```
+
+`status` is `ok` / `failed` / `skipped`. `stage` names the phase a job
+died in — `roster`, `applicable`, `build`, `plan`, `fit` — and is
+populated only on failed and skipped rows; it is the first column to
+read when a sweep goes wrong. `seconds` is null on resume-skipped rows.
+
+`<report>.partial` carries the same rows in **completion** order and is
+unlinked on a clean exit, so a `.partial` left on disk is the record of
+a batch that died. Per-job logs are `<log_dir>/<target>__<recipe>.log`
+(double underscore), in `batch_logs/` beside the report by default.
+
+### 5.7 The generation report
+
+`<roster path>.report.csv` — the suffix is appended, so a roster at
+`roster.json` reports to `roster.json.report.csv`. Five columns,
+`generate.REPORT_COLUMNS`: `target, source, status, detail, bands`,
+where `status` is `kept` / `partial` / `dropped`, `bands` is
+space-joined, and `detail` carries the per-template "absent" trail when
+a source was dropped.
 
 ---
 
@@ -667,8 +865,11 @@ replace.
 
 Add an entry to `sedfit/data/registry.json` naming its `instrument` and
 either a `sedpy` filter name or a `curve` path relative to the registry
-file. Note that `bandpass_hash()` is a global digest, so adding a band
-changes every subsequent `run_id`.
+file. The `instrument` must already appear in the registry's top-level
+`instruments` list — the loader hard-errors on an unknown one, so add it
+there in the same edit if it is new — and a band name may not begin with
+the SPHEREx channel prefix. Note that `bandpass_hash()` is a global
+digest, so adding a band changes every subsequent `run_id`.
 
 ### 6.2 Adding a provider
 
@@ -681,11 +882,18 @@ stay prefix-free.
 Drop a directory of two-column ASCII spectra under
 `sedfit/data/templates/<name>/` and configs can name it as
 `"templates": "<name>"`. Any filesystem path still works, and paths are
-tried first. `resolve_spectra` globs the config's `template_pattern`
-(default `*_spec.dat`) and falls back only to `*.dat`, so name the files
-accordingly or set the pattern. The quick engine additionally requires
-plain two-column ASCII and points at `engine: eazy-py` for anything
-else.
+tried first. The quick engine additionally requires plain two-column
+ASCII and points at `engine: eazy-py` for anything else.
+
+`resolve_spectra` globs the config's `template_pattern` (default
+`*_spec.dat`) and falls back to `*.dat` **only when the pattern matches
+nothing at all**. A pattern matching *part* of a directory does not fall
+back: it under-selects the basis and raises a `UserWarning` naming both
+counts, because a basis silently missing members is a scientific error
+rather than a preference. This is live for the adopted set —
+`brown14_vac_cosmos160` holds 129 `*_spec.dat` Brown spectra plus 31
+differently-named COSMOS files, so fitting all 160 requires
+`"template_pattern": "*.dat"`.
 
 ### 6.4 A new recipe
 
@@ -711,7 +919,9 @@ two of them currently fall through to Prospector rather than erroring:
 
 Keep the implementation out of `sedfit/core/`: `tests/test_layering.py`
 forbids `core/` and `analysis/` from importing `eazy`, `prospect` or
-`fsps` at module scope. Note it does not forbid `core/` importing
+`fsps` **anywhere in the file** — it walks the full AST, so a lazy
+import inside a function body fails it exactly as a top-level one does.
+Note it does not forbid `core/` importing
 `sedfit.backends.*` — that layering is a convention, not a test.
 
 ---
@@ -725,10 +935,25 @@ That is the cost of the guarantee that a loaded roster's declarations
 are true. A batch pays it once in the parent **and once per worker**, so
 a six-worker sweep loads the roster seven times.
 
-**`--deredden` selects a different table.** The build writes
-`..._dered.csv` alongside the as-measured one, and the fit looks for
-whichever the flag selects. A batch that builds without `--deredden` and
-fits with it will not find its table.
+**`--deredden` selects a different table.** A dereddening build writes
+`..._dered.csv` *instead of* the as-measured table — one call writes one
+table — and the fit looks for whichever the flag selects. Run `build`
+twice to have both on disk. Inside one batch the flag drives both the
+build and the selection, so they cannot disagree; the trap is across
+invocations, where `sedfit batch --build` followed by `sedfit batch
+--deredden` finds no `_dered` table.
+
+**A `template_pattern` can silently shrink your basis.** The default
+`*_spec.dat` selects only the 129 Brown spectra of the 160-template
+adopted set. It warns, but the warning is a `UserWarning` on stdout
+inside a batch worker's per-job log, which is easy to miss. The template
+basis is the dominant systematic a fit carries.
+
+**`SPHEREX_TOPHAT_SAMPLES` is quadrature resolution, not cosmetics.**
+Prospector's exact filters integrate the source on the filter grid, so
+the tophat sample count sets the projection accuracy. It is not in
+`run_id`, so two runs at different sample counts share an id and differ
+numerically; the manifest row records the value that ran.
 
 **Excluded bands are not dropped from the table.** The policy marks them
 and each backend substitutes its own missing representation — a sentinel

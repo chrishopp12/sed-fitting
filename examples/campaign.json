@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Worked example: three galaxies, three broadband sources, a SPHEREx spectrum, three recipes.",
+  "description": "Worked example: three galaxies, three broadband sources, a SPHEREx spectrum, four recipes.",
   "sample": "example_sample",
   "data_root": "data",
   "reference_redshift": 0.106,
