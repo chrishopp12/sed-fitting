@@ -396,7 +396,7 @@ def run_job(
 
     row = {
         "run_id": rid,
-        "path": str(run_dir.relative_to(roster.data_root)),
+        "path": run_dir.relative_to(roster.data_root).as_posix(),
         "written": now_iso(),
         "target": target_name, "recipe": recipe_name, "backend": backend,
         "engine": None, "sampler": None,

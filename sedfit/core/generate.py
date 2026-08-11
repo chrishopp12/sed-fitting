@@ -349,7 +349,7 @@ def _resolve_spherex(target_dir: Path, target: dict,
         relative = _format(pattern, target)
         matches = sorted(p for p in target_dir.glob(relative) if p.is_file())
         if len(matches) > 1:
-            names = [str(p.relative_to(target_dir)) for p in matches]
+            names = [p.relative_to(target_dir).as_posix() for p in matches]
             raise ValueError(
                 f"target[{target['name']}].spherex: pattern {relative!r} "
                 f"matches {len(matches)} tables {names}; name one "
@@ -357,7 +357,7 @@ def _resolve_spherex(target_dir: Path, target: dict,
         if not matches:
             tried.append(f"{relative}: no match")
             continue
-        return ({"table": str(matches[0].relative_to(target_dir)),
+        return ({"table": matches[0].relative_to(target_dir).as_posix(),
                  "model": spec["model"],
                  "provenance": spec["provenance"]},
                 {**row, "status": STATUS_KEPT, "detail": ""})

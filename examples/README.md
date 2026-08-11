@@ -243,5 +243,19 @@ the input ones but not on them — with eight broadbands and a 5% error
 floor, that scatter is what a photometric redshift looks like. Compare
 `zred_p50` in `batch_report.csv` against `z_ref` in `sample_catalog.csv`.
 
+The SPHEREx table is a coarse stand-in, not a model of the instrument.
+Real SPHEREx covers 0.75–5.0 µm continuously in 102 channels across six
+LVF bands, each channel's passband abutting its neighbors'. This one
+carries 21 channels on a linear grid, spaced about 2.5 times their own
+widths, and holds nothing between 1.13 and 2.7 µm. The two segments
+straddle the recipes' `split_um` of 2.6, so both binning regimes are
+exercised. The gap is how the file was written, not a failed extraction.
+
+Channel labels are positional. `SPHEREx_NNN` numbers the rows of the
+spectrum it came from, so one label is different wavelengths across
+targets that deliver different channels: `SPHEREx_006` is 1.13 µm for
+`gal_0001` and 2.7 µm for `gal_0003`, which is short one blue channel.
+Filters are built per row from `wave_um`. Never key on the label.
+
 Nothing here is real data. Do not use it for anything but learning the
 file formats.

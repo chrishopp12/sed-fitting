@@ -195,8 +195,9 @@ def bin_spectrum(
     -------
     spectrum : pd.DataFrame
         Columns band, flux_uJy, flux_err_uJy, scatter_uJy, wave_um,
-        bandwidth_um, n_exp; channels labeled SPHEREx_NNN in ascending
-        wavelength order.
+        bandwidth_um, n_exp; channels labeled SPHEREx_NNN by position in
+        ascending wavelength order. The label indexes this table, not a
+        fixed channel: wave_um is the only cross-target identity.
     """
     ordered = frame.sort_values("lambda").reset_index(drop=True)
     lam = ordered["lambda"].to_numpy(dtype=float)

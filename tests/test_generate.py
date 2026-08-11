@@ -421,6 +421,25 @@ def test_the_spherex_table_is_matched_by_pattern(tmp_path) -> None:
         "Photometry/SPHEREx/table_photometry.sersic-9f8e7d.csv"
 
 
+def test_the_matched_table_is_recorded_with_posix_separators(tmp_path) -> None:
+    # The table is the one roster path built by globbing the tree rather
+    # than copied from the campaign, so it is the one that can pick up a
+    # native separator. A roster carrying backslashes does not resolve on
+    # POSIX, where they are an ordinary filename character.
+    campaign_path = _tree(tmp_path)
+    campaign_path.write_text(json.dumps(
+        _spherex_campaign("Photometry/SPHEREx/table_photometry.*.csv")))
+    (_sx_dir(tmp_path, "gal_a") / "table_photometry.sersic-a1b2c3.csv"
+     ).write_text("wave_um\n1.0\n")
+
+    roster, _ = generate_roster(
+        read_sample_catalog(_catalog(tmp_path, [_row("A", "gal_a")]))[0],
+        load_campaign(campaign_path), registry=REG, campaign_dir=tmp_path)
+    table = roster["targets"]["A"]["spherex"]["table"]
+    assert "\\" not in table
+    assert table.count("/") == 2
+
+
 def test_several_extractions_refuse_rather_than_pick(tmp_path) -> None:
     # A galaxy with more than one extraction on disk is exactly where a
     # silent choice would bury which one a flux came from.
