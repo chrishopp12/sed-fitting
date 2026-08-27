@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from astropy.cosmology import WMAP9
 from prospect.models import SpecModel
+from prospect.models.sedmodel import PolySpecModel
 
 if TYPE_CHECKING:
     from prospect.sources import CSPSpecBasis, FastStepBasis
@@ -133,6 +134,68 @@ def _set_agn(model_params) -> None:
     model_params["agn_tau"]["init"] = 20.0
     model_params["agn_tau"]["prior"] = priors.LogUniform(mini=5.0, maxi=150.0)
     model_params["add_agn_dust"]["init"] = True
+
+
+def _set_spectrum(model_params, spec_cfg: dict) -> None:
+    """Model parameters for a joint photometry+spectrum fit.
+
+    Smoothing is always declared explicitly: prospect's smoothspec
+    silently applies sigma_smooth = 100 km/s when the parameter is
+    absent, so absence is never allowed to choose the physics. The
+    calibration polynomial order is a fixed parameter PolySpecModel
+    reads; jitter scales the spectral uncertainty; the outlier mixture
+    de-weights channels the model cannot reach.
+    """
+    from prospect.models import priors
+
+    model_params["smoothtype"] = {"N": 1, "isfree": False, "init": "vel"}
+    model_params["fftsmooth"] = {"N": 1, "isfree": False, "init": True}
+    if spec_cfg["smooth_sigma_fixed"] is not None:
+        model_params["sigma_smooth"] = {
+            "N": 1, "isfree": False, "units": "km/s",
+            "init": spec_cfg["smooth_sigma_fixed"],
+        }
+    else:
+        lo, hi = spec_cfg["smooth_sigma_prior"]
+        model_params["sigma_smooth"] = {
+            "N": 1, "isfree": True, "units": "km/s",
+            "init": spec_cfg["smooth_sigma_init"],
+            "prior": priors.TopHat(mini=lo, maxi=hi),
+        }
+
+    if spec_cfg["polyorder"] > 0:
+        model_params["polyorder"] = {"N": 1, "isfree": False,
+                                     "init": spec_cfg["polyorder"]}
+
+    if spec_cfg["jitter_prior"] is not None:
+        lo, hi = spec_cfg["jitter_prior"]
+        model_params["spec_jitter"] = {
+            "N": 1, "isfree": True, "init": spec_cfg["jitter_init"],
+            "prior": priors.TopHat(mini=lo, maxi=hi),
+        }
+
+    if spec_cfg["outlier_prior"] is not None:
+        lo, hi = spec_cfg["outlier_prior"]
+        model_params["f_outlier_spec"] = {
+            "N": 1, "isfree": True, "init": 0.5 * (lo + hi),
+            "prior": priors.TopHat(mini=lo, maxi=hi),
+        }
+        model_params["nsigma_outlier_spec"] = {
+            "N": 1, "isfree": False, "init": spec_cfg["outlier_nsigma"]}
+
+    if spec_cfg.get("eline_sigma_kms") is not None:
+        # FSPS's in-spectrum nebular lines carry the library-resolution
+        # convention width, not the observed one; drawing them in
+        # prospect at an explicitly configured total width (intrinsic
+        # (+) instrumental, measured upstream) puts the line profiles
+        # at the data's resolution. Photometry still receives the line
+        # fluxes through nebline_photometry, so band predictions are
+        # unchanged in content.
+        model_params["nebemlineinspec"] = {"N": 1, "isfree": False,
+                                           "init": False}
+        model_params["eline_sigma"] = {
+            "N": 1, "isfree": False, "units": "km/s",
+            "init": spec_cfg["eline_sigma_kms"]}
 
 
 def _set_sp_prior(model_params, name: str, prior_type: str, prior_spec,
@@ -299,11 +362,12 @@ def _build_continuity_params(cfg: dict) -> dict:
 # Free per-instrument normalization
 # ------------------------------------
 
-class _NormSpecModel(SpecModel):
-    """A SpecModel applying a free multiplicative normalization to
-    selected instruments' model photometry (instruments with no SPHEREx
-    anchor float their level). Pure pass-through when norm_groups is
-    empty. Module-level so dynesty checkpointing can pickle the model.
+class _NormMixin:
+    """Free multiplicative normalization on selected instruments' model
+    photometry (instruments with no SPHEREx anchor float their level).
+    Pure pass-through when norm_groups is empty. Mixed into a concrete
+    SpecModel subclass; both concretions are module-level so dynesty
+    checkpointing can pickle the model.
     """
 
     norm_groups = None
@@ -319,6 +383,17 @@ class _NormSpecModel(SpecModel):
             for pname, mask in groups.items():
                 phot[mask] *= float(np.atleast_1d(self.params[pname])[0])
         return spec, phot, x
+
+
+class _NormSpecModel(_NormMixin, SpecModel):
+    """The photometry-only concretion: no spectroscopic calibration."""
+
+
+class _NormPolySpecModel(_NormMixin, PolySpecModel):
+    """The joint-fit concretion: PolySpecModel's maximum-likelihood
+    Chebyshev calibration vector absorbs the smooth ratio between the
+    observed spectrum and the model, so the spectrum constrains features
+    while the photometry anchors the absolute scale."""
 
 
 def _set_free_norms(model_params, p: dict) -> None:
@@ -363,13 +438,27 @@ def attach_norm_masks(model, obs: dict, cfg: dict,
 # ------------------------------------
 
 def build_model(cfg: dict) -> SpecModel:
-    """Build the Prospector SpecModel for a resolved config."""
+    """Build the Prospector SpecModel for a resolved config.
+
+    A config with a spectrum block gets the PolySpecModel concretion
+    (unless polyorder is 0, which turns the calibration vector off) and
+    the explicit smoothing/jitter/outlier parameters; a photometry-only
+    config gets exactly the model it always did.
+    """
     p = cfg["prospector"]
     if p["sfh"] == "continuity":
         model_params = _build_continuity_params(cfg)
     else:
         model_params = _build_parametric_params(cfg)
     _set_free_norms(model_params, p)
+    # .get(): staged configs echoed before the spectrum key existed
+    # rebuild (for replotting) exactly as photometry-only fits.
+    spec_cfg = p.get("spectrum")
+    if spec_cfg is None:
+        return _NormSpecModel(model_params)
+    _set_spectrum(model_params, spec_cfg)
+    if spec_cfg["polyorder"] > 0:
+        return _NormPolySpecModel(model_params)
     return _NormSpecModel(model_params)
 
 

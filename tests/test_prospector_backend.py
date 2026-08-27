@@ -176,3 +176,141 @@ def test_stellar_library_assert() -> None:
     assert_stellar_library(sps, "miles")
     with pytest.raises(RuntimeError, match="stellar_library mismatch"):
         assert_stellar_library(sps, "c3k")
+
+
+# ------------------------------------
+# Joint photometry+spectrum fits
+# ------------------------------------
+
+def _spectrum(tmp_path, n=40):
+    import json
+
+    import pandas as pd
+
+    from sedfit.core.spectrum import read_spectrum, sidecar_path
+
+    wave = np.linspace(9000.0, 9390.0, n)
+    mask = np.ones(n, dtype=int)
+    mask[:4] = 0
+    path = tmp_path / "spec.csv"
+    pd.DataFrame({"wave_A": wave, "flux_uJy": np.full(n, 5.0),
+                  "flux_err_uJy": np.full(n, 0.5),
+                  "mask": mask}).to_csv(path, index=False)
+    sidecar_path(path).write_text(json.dumps(
+        {"wave_frame": "vacuum", "flux_unit": "uJy"}), encoding="utf-8")
+    return read_spectrum(path)
+
+
+def _spec_cfg(tmp_path=None, **spectrum_overrides):
+    spectrum = {"file": "spec.csv"}
+    spectrum.update(spectrum_overrides)
+    return _cfg(spectrum=spectrum)
+
+
+def test_obs_carries_the_spectrum(tmp_path) -> None:
+    frame = _frame()
+    cfg = _spec_cfg(mask_windows=[[9350.0, 9400.0]])
+    spectrum = _spectrum(tmp_path)
+    obs = build_obs(cfg, frame, _policy(frame), registry=REG,
+                    spectrum=spectrum)
+    assert obs["wavelength"].size == 40
+    assert obs["spectrum"][10] == pytest.approx(5.0 / MU / UJY_PER_MAGGIE)
+    assert obs["unc"][10] == pytest.approx(0.5 / MU / UJY_PER_MAGGIE)
+    # file mask and config windows both excluded; ndof counts the rest
+    assert not obs["mask"][:4].any()
+    assert not obs["mask"][obs["wavelength"] >= 9350.0].any()
+    n_spec = int(obs["mask"].sum())
+    assert obs["ndof"] == len(obs["maggies"]) + n_spec
+
+    plain = build_obs(cfg, frame, _policy(frame), registry=REG)
+    assert plain["spectrum"] is None
+
+
+def test_obs_requires_channels_beyond_polyorder(tmp_path) -> None:
+    frame = _frame()
+    cfg = _spec_cfg(polyorder=36)
+    with pytest.raises(ValueError, match="polyorder-36"):
+        build_obs(cfg, frame, _policy(frame), registry=REG,
+                  spectrum=_spectrum(tmp_path))
+
+
+def test_model_spectrum_parameters() -> None:
+    from sedfit.backends.prospector.model import (_NormPolySpecModel,
+                                                  _NormSpecModel)
+
+    model = build_model(_spec_cfg(jitter_prior=[0.5, 3.0],
+                                  outlier_prior=[1.0e-5, 0.1]))
+    assert isinstance(model, _NormPolySpecModel)
+    free = set(model.free_params)
+    assert {"sigma_smooth", "spec_jitter", "f_outlier_spec"} <= free
+    assert int(np.atleast_1d(model.params["polyorder"])[0]) == 12
+    assert str(np.atleast_1d(model.params["smoothtype"])[0]) == "vel"
+    prior = model.config_dict["sigma_smooth"]["prior"]
+    assert float(prior.params["mini"]) == pytest.approx(10.0)
+    assert float(prior.params["maxi"]) == pytest.approx(400.0)
+
+    fixed = build_model(_spec_cfg(smooth_sigma_fixed=60.0))
+    assert "sigma_smooth" not in set(fixed.free_params)
+    assert float(np.atleast_1d(fixed.params["sigma_smooth"])[0]) \
+        == pytest.approx(60.0)
+
+    no_poly = build_model(_spec_cfg(polyorder=0))
+    assert isinstance(no_poly, _NormSpecModel)
+
+    photometry_only = build_model(_cfg())
+    assert isinstance(photometry_only, _NormSpecModel)
+    assert "sigma_smooth" not in photometry_only.params
+
+
+def test_model_tolerates_pre_spectrum_configs() -> None:
+    cfg = _cfg()
+    del cfg["prospector"]["spectrum"]
+    from sedfit.backends.prospector.model import _NormSpecModel
+
+    assert isinstance(build_model(cfg), _NormSpecModel)
+
+
+def test_eline_sigma_draws_lines_in_prospect() -> None:
+    cfg = _cfg(nebular=True,
+               spectrum={"file": "spec.csv", "eline_sigma_kms": 70.0})
+    model = build_model(cfg)
+    assert bool(np.atleast_1d(model.params["nebemlineinspec"])[0]) is False
+    assert float(np.atleast_1d(model.params["eline_sigma"])[0]) \
+        == pytest.approx(70.0)
+    assert "eline_sigma" not in model.free_params
+
+    default = build_model(_cfg(nebular=True, spectrum={"file": "spec.csv"}))
+    assert bool(np.atleast_1d(default.params["nebemlineinspec"])[0]) is True
+    assert "eline_sigma" not in default.params
+
+    from sedfit.core.fitconfig import parse_fit_config
+    with pytest.raises(ValueError, match="meaningless with nebular off"):
+        parse_fit_config({
+            "schema_version": 2, "backend": "prospector", "name": "t",
+            "prospector": {"stellar_library": "miles",
+                           "fit_redshift": False,
+                           "spectrum": {"file": "s.csv",
+                                        "eline_sigma_kms": 70.0}}})
+
+
+def test_spectrum_model_picklable() -> None:
+    import pickle
+
+    model = build_model(_spec_cfg(jitter_prior=[0.5, 3.0]))
+    rebuilt = pickle.loads(pickle.dumps(model))
+    assert set(rebuilt.free_params) == set(model.free_params)
+
+
+def test_build_noise() -> None:
+    from sedfit.backends.prospector.fitting import build_noise
+
+    assert build_noise(_cfg()) == (None, None)
+    assert build_noise(_spec_cfg()) == (None, None)
+
+    spec_noise, phot_noise = build_noise(_spec_cfg(jitter_prior=[0.5, 3.0]))
+    assert phot_noise is None
+    spec_noise.update(spec_jitter=2.0)
+    unc = np.array([1.0, 2.0])
+    sigma = spec_noise.construct_covariance(unc=unc,
+                                            mask=np.ones(2, dtype=bool))
+    assert np.allclose(sigma, (2.0 * unc) ** 2)

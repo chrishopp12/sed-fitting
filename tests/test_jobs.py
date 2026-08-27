@@ -37,6 +37,37 @@ def _setup(tmp_path):
     return roster, parse_fit_config(_raw_cfg(tmp_path))
 
 
+def test_an_undispatchable_backend_is_refused_before_anything_is_written(
+        tmp_path) -> None:
+    """A backend jobs.py cannot run is refused by name, early.
+
+    The four branches this guards used to end in a bare `else:` meaning
+    "prospector". Measured 2026-08-25: a linear config sent through the old
+    code died in apply_policy on `TypeError: '<' not supported between
+    instances of NoneType and int`, naming neither the backend nor the
+    reason. It failed before stage_run only because the photometry-only
+    fields are nulled under a spectrum-only backend -- a backend that got
+    past the policy gates would have reached stage_run first, which is the
+    failure DESIGN.md 16.6 describes. The run-directory assertion below
+    pins that property for whatever backend comes next.
+    """
+    roster, _ = _setup(tmp_path)
+    linear = parse_fit_config({
+        "schema_version": 2, "backend": "linear", "name": "jobtest",
+        "linear": {"templates": str(tmp_path / "templates"),
+                   "template_wave_range": [3600.0, 7400.0],
+                   "z_min": 0.05, "z_max": 0.15, "poly_wave_frame": "air",
+                   "spectrum": {"file": str(tmp_path / "spec.csv")}}})
+
+    for verb in (plan_job, run_job):
+        with pytest.raises(NotImplementedError, match="'linear'") as excinfo:
+            verb(roster, "A", "tilt2", linear, registry=REG)
+        assert "no photometry table" in str(excinfo.value)
+
+    assert not (roster.targets["A"].dir / "SED" / "tilt2" / "linear").exists()
+    assert not roster.manifest_path.exists()
+
+
 def test_job_end_to_end(tmp_path) -> None:
     roster, cfg = _setup(tmp_path)
     row = run_job(roster, "A", "tilt2", cfg, registry=REG)

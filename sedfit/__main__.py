@@ -57,6 +57,11 @@ DEFAULT_ROSTER_NAME = "roster.json"
 # Verb handlers
 # ------------------------------------
 
+def _registry(args: argparse.Namespace):
+    """The packaged registry, or the one named by --registry."""
+    return load_registry(getattr(args, "registry", None))
+
+
 def _roster(args: argparse.Namespace) -> int:
     """Generate a roster from a sample catalog and a campaign config."""
     from sedfit.core.generate import (
@@ -66,7 +71,7 @@ def _roster(args: argparse.Namespace) -> int:
         write_roster,
     )
 
-    registry = load_registry()
+    registry = _registry(args)
     targets, column_report = read_sample_catalog(args.catalog)
     campaign = load_campaign(args.campaign)
     print(column_report)
@@ -101,7 +106,7 @@ def _build(args: argparse.Namespace) -> int:
     if args.mw_ebv is not None and not args.deredden:
         raise SystemExit("--mw-ebv applies only with --deredden")
 
-    registry = load_registry()
+    registry = _registry(args)
     roster = load_roster(args.roster, registry)
     targets = [_known(args.target, roster.targets, "target")] if args.target \
         else list(roster.targets)
@@ -158,7 +163,7 @@ def _fit(args: argparse.Namespace) -> int:
         raise SystemExit("--phot-csv and --label apply to a single job, "
                          "not to --jobs")
 
-    registry = load_registry()
+    registry = _registry(args)
     roster = load_roster(args.roster, registry)
 
     if args.dry_run:
@@ -257,7 +262,7 @@ def _plot(args: argparse.Namespace) -> int:
     if not config_path.is_file():
         raise SystemExit(f"{run_dir} is not a run directory (no config.json)")
     cfg = json.loads(config_path.read_text(encoding="utf-8"))
-    registry = load_registry()
+    registry = _registry(args)
     if cfg["backend"] == "eazy":
         from sedfit.backends.eazy.plots import generate_plots
         from sedfit.backends.eazy.results import load_run
@@ -279,7 +284,7 @@ def _manifest(args: argparse.Namespace) -> int:
     """Summarize the central run manifest and check its run directories."""
     from sedfit.core.runs import read_manifest
 
-    registry = load_registry()
+    registry = _registry(args)
     roster = load_roster(args.roster, registry)
     rows, problems = read_manifest(roster.manifest_path)
     latest: dict[str, dict] = {}
@@ -346,6 +351,13 @@ def _add_roster_arg(parser: argparse.ArgumentParser) -> None:
         help="the roster JSON declaring targets, sources and recipes")
 
 
+def _add_registry_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--registry", default=None,
+        help="a campaign band-registry JSON instead of the packaged one; "
+             "use the same registry for roster, build, fit and plot")
+
+
 def _add_fit_args(parser: argparse.ArgumentParser) -> None:
     """Options shared by fit and batch, so the two cannot drift apart."""
     parser.add_argument(
@@ -385,6 +397,7 @@ def build_parser() -> argparse.ArgumentParser:
                              "it [default: roster.json next to --campaign]")
     roster.add_argument("--dry-run", action="store_true",
                         help="report what would be declared, write nothing")
+    _add_registry_arg(roster)
     roster.set_defaults(handler=_roster)
 
     # -- build --
@@ -403,6 +416,7 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--mw-ebv", type=float, default=None,
                        help="one E(B-V) for every target instead of the "
                             "per-target SFD lookup; needs --deredden")
+    _add_registry_arg(build)
     build.set_defaults(handler=_build)
 
     # -- fit --
@@ -426,6 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
     fit.add_argument("--dry-run", action="store_true",
                      help="resolve and validate every job, write nothing")
     _add_fit_args(fit)
+    _add_registry_arg(fit)
     fit.set_defaults(handler=_fit)
 
     # -- batch --
@@ -512,12 +527,14 @@ def build_parser() -> argparse.ArgumentParser:
     plot = subparsers.add_parser("plot", help=desc, description=desc)
     plot.add_argument("--run-dir", required=True,
                       help="a run directory written by sedfit fit")
+    _add_registry_arg(plot)
     plot.set_defaults(handler=_plot)
 
     # -- manifest --
     desc = "Summarize the central run manifest and check its run directories."
     manifest = subparsers.add_parser("manifest", help=desc, description=desc)
     _add_roster_arg(manifest)
+    _add_registry_arg(manifest)
     manifest.set_defaults(handler=_manifest)
 
     return parser

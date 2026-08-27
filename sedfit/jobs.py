@@ -38,10 +38,15 @@ import pandas as pd
 
 import sedfit
 from sedfit.core.build import SED_TABLE_SUBDIR
-from sedfit.core.fitconfig import hash_projection, resolve_config
+from sedfit.core.fitconfig import (
+    USES_PHOTOMETRY,
+    hash_projection,
+    resolve_config,
+)
 from sedfit.core.policy import apply_policy
 from sedfit.core.provenance import git_state, run_id as make_run_id, sha256_bytes
 from sedfit.core.runs import finalize_run, now_iso, stage_run
+from sedfit.core.spectrum import apply_spectrum_policy, read_spectrum
 from sedfit.core.synth import SPHEREX_TOPHAT_SAMPLES
 from sedfit.core.table import validate_sed_table
 
@@ -108,6 +113,25 @@ def _check_sidecar(sidecar: dict, *, recipe_name: str, z_ref: float,
     return warnings
 
 
+def _undispatchable(backend: str) -> NotImplementedError:
+    """The error every backend branch here ends in.
+
+    These branches used to end in a bare `else:` that meant "prospector", so
+    a third backend was handed to the Prospector path and died on a bare
+    KeyError -- in run_job's case after stage_run had already created a run
+    directory. Naming the backend, and raising in plan_job before anything is
+    written, is the whole point.
+    """
+    reads_photometry = USES_PHOTOMETRY.get(backend)
+    why = ""
+    if reads_photometry is False:
+        why = (" It fits a spectrum with no photometry table, which this "
+               "module's identity and staging path does not yet describe; "
+               "call sedfit.backends.linear directly. See DESIGN.md 16.3.")
+    return NotImplementedError(
+        f"jobs.py cannot dispatch backend {backend!r}.{why}")
+
+
 def _backend_versions(backend: str, engine: str | None = None) -> dict:
     """Versions of the packages a run's numbers actually depend on.
 
@@ -118,7 +142,7 @@ def _backend_versions(backend: str, engine: str | None = None) -> dict:
     Parameters
     ----------
     backend : str
-        'eazy' or 'prospector'.
+        A name from fitconfig.BACKENDS that run_job can dispatch.
     engine : str or None
         The eazy engine name; ignored for other backends.
 
@@ -131,9 +155,11 @@ def _backend_versions(backend: str, engine: str | None = None) -> dict:
 
     if backend == "eazy":
         distributions = {"eazy": "eazy"} if engine == "eazy-py" else {}
-    else:
+    elif backend == "prospector":
         distributions = {"prospector": "astro-prospector", "fsps": "fsps",
                          "dynesty": "dynesty"}
+    else:
+        raise _undispatchable(backend)
 
     versions = {}
     for name, dist in distributions.items():
@@ -203,12 +229,13 @@ def _prepare_sps(resolved):
 
 
 def _run_prospector(resolved, frame, policy, run_dir, registry, sps,
-                    plots):
+                    plots, spectrum=None):
     from sedfit.backends.prospector.fitting import run_sampler, save_results
     from sedfit.backends.prospector.model import attach_norm_masks, build_model
     from sedfit.backends.prospector.obs import build_obs
 
-    obs = build_obs(resolved, frame, policy, registry=registry)
+    obs = build_obs(resolved, frame, policy, registry=registry,
+                    spectrum=spectrum)
     model = build_model(resolved)
     attach_norm_masks(model, obs, resolved, registry)
 
@@ -232,17 +259,29 @@ def _run_prospector(resolved, frame, policy, run_dir, registry, sps,
     weights = np.exp(output["sampling"][0]["logwt"]
                      - output["sampling"][0]["logz"][-1])
     labels = model.theta_labels()
+
+    def percentiles(values):
+        order = np.argsort(values)
+        cdf = np.cumsum(weights[order])
+        cdf = cdf / cdf[-1]
+        return np.interp([0.16, 0.5, 0.84], cdf, values[order])
+
     estimates = {}
-    for key in ("zred", "logmass"):
+    for key in ("zred", "logmass", "sigma_smooth", "spec_jitter",
+                "f_outlier_spec"):
         if key in labels:
-            values = chain[:, labels.index(key)]
-            order = np.argsort(values)
-            cdf = np.cumsum(weights[order])
-            cdf = cdf / cdf[-1]
-            p16, p50, p84 = np.interp([0.16, 0.5, 0.84], cdf, values[order])
+            p16, p50, p84 = percentiles(chain[:, labels.index(key)])
             estimates[f"{key}_p16"] = float(p16)
             estimates[f"{key}_p50"] = float(p50)
             estimates[f"{key}_p84"] = float(p84)
+    # the parametric dynesty family samples linear mass; report its log
+    if "logmass" not in labels and "mass" in labels:
+        values = chain[:, labels.index("mass")]
+        if (values > 0).all():
+            p16, p50, p84 = percentiles(np.log10(values))
+            estimates["logmass_p16"] = float(p16)
+            estimates["logmass_p50"] = float(p50)
+            estimates["logmass_p84"] = float(p84)
     return estimates
 
 
@@ -284,6 +323,10 @@ def plan_job(
     resolved = resolve_config(cfg, target_z_ref=target.z_ref,
                               reference_redshift=roster.reference_redshift)
     backend = resolved["backend"]
+    # Before the photometry read, and long before stage_run: a backend this
+    # module cannot dispatch must not get as far as a run directory.
+    if backend not in ("eazy", "prospector"):
+        raise _undispatchable(backend)
 
     phot_path = (Path(phot_csv) if phot_csv is not None
                  else phot_path_for(target, recipe_name, dered=dered))
@@ -319,19 +362,33 @@ def plan_job(
 
     digests = None
     template_prov = None
+    spectrum = None
     if backend == "eazy":
         from sedfit.backends.eazy.templates import (content_digests,
                                                     template_summary)
 
         digests = content_digests(resolved["eazy"])
         template_prov = template_summary(resolved["eazy"], digests)
+    elif backend == "prospector":
+        spec_cfg = resolved["prospector"].get("spectrum")
+        if spec_cfg is not None:
+            spectrum = read_spectrum(spec_cfg["file"])
+            # verify the policy leaves fittable channels before staging
+            apply_spectrum_policy(spectrum,
+                                  mu_lensing=resolved["mu_lensing"],
+                                  err_floor=spec_cfg["err_floor"],
+                                  mask_windows=spec_cfg["mask_windows"])
+            digests = {"spectrum": spectrum.sha256}
+    else:
+        raise _undispatchable(backend)
     rid = make_run_id(hash_projection(resolved, digests=digests), phot_sha,
                       registry.bandpass_hash())
     return {"target": target, "resolved": resolved, "backend": backend,
             "phot_path": phot_path, "phot_bytes": phot_bytes,
             "phot_sha": phot_sha, "frame": frame, "sidecar": sidecar,
             "warnings": warnings, "policy": policy, "digests": digests,
-            "template_prov": template_prov, "run_id": rid}
+            "template_prov": template_prov, "spectrum": spectrum,
+            "run_id": rid}
 
 
 def run_job(
@@ -380,6 +437,7 @@ def run_job(
     phot_sha = plan["phot_sha"]
     warnings = plan["warnings"]
     template_prov = plan["template_prov"]
+    spectrum = plan["spectrum"]
     rid = plan["run_id"]
 
     sps = None
@@ -392,7 +450,13 @@ def run_job(
     run_dir = stage_run(backend_dir, rid, config=resolved,
                         phot_bytes=plan["phot_bytes"], phot_sha256=phot_sha,
                         sidecar=plan["sidecar"], machinery=machinery,
-                        label=label or resolved["name"], force=force)
+                        label=label or resolved["name"], force=force,
+                        spectrum_bytes=(spectrum.csv_bytes if spectrum
+                                        else None),
+                        spectrum_sha256=(spectrum.sha256 if spectrum
+                                         else None),
+                        spectrum_sidecar=(spectrum.provenance if spectrum
+                                          else None))
 
     row = {
         "run_id": rid,
@@ -419,18 +483,31 @@ def run_job(
     if backend == "eazy":
         row["engine"] = resolved["eazy"]["engine"]
         row["templates"] = template_prov
-    else:
+    elif backend == "prospector":
         row["sampler"] = resolved["prospector"]["sampler"]
+        if spectrum is not None:
+            spec_cfg = resolved["prospector"]["spectrum"]
+            _, _, spec_mask = apply_spectrum_policy(
+                spectrum, mu_lensing=resolved["mu_lensing"],
+                err_floor=spec_cfg["err_floor"],
+                mask_windows=spec_cfg["mask_windows"])
+            row["spectrum_sha256_16"] = spectrum.sha256[:16]
+            row["n_spec_channels"] = int(spectrum.mask.size)
+            row["n_spec_fit"] = int(spec_mask.sum())
+    else:
+        raise _undispatchable(backend)
 
     manifest_path = roster.manifest_path
     try:
         if backend == "eazy":
             row["estimates"] = _run_eazy(resolved, frame, policy, run_dir,
                                          registry, phot_sha, plots)
-        else:
+        elif backend == "prospector":
             row["estimates"] = _run_prospector(resolved, frame, policy,
                                                run_dir, registry, sps,
-                                               plots)
+                                               plots, spectrum=spectrum)
+        else:
+            raise _undispatchable(backend)
         row["status"] = "ok"
     except Exception as err:
         row["error"] = f"{type(err).__name__}: {err}"

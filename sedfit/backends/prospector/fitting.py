@@ -45,6 +45,28 @@ EMCEE_DEFAULTS = {
 }
 
 
+def build_noise(cfg: dict) -> tuple:
+    """The (spec_noise, phot_noise) pair for the resolved config.
+
+    A spectrum block with a jitter prior gets an uncorrelated noise
+    model whose spec_jitter parameter rescales the spectral uncertainty
+    per likelihood call; everything else keeps prospect's plain
+    chi-square path. The outlier mixture needs no noise object -- its
+    f_outlier_spec parameter is read from the model inside lnprobfn.
+    """
+    spec_cfg = (cfg["prospector"].get("spectrum") or {})
+    if spec_cfg.get("jitter_prior") is None:
+        return (None, None)
+
+    from prospect.likelihood import NoiseModel
+    from prospect.likelihood.kernels import Uncorrelated
+
+    jitter = Uncorrelated(parnames=["spec_jitter"])
+    spec_noise = NoiseModel(kernels=[jitter], metric_name="unc",
+                            mask_name="mask", weight_by=["unc"])
+    return (spec_noise, None)
+
+
 def run_sampler(
         cfg: dict,
         obs: dict,
@@ -82,6 +104,7 @@ def run_sampler(
     p = cfg["prospector"]
     seed = int(p["seed"])
     np.random.seed(seed & 0xFFFFFFFF)
+    noise = build_noise(cfg)
 
     if p["sampler"] == "emcee":
         from prospect.fitting import fit_model
@@ -89,8 +112,8 @@ def run_sampler(
         kwargs = {**EMCEE_DEFAULTS, **p["emcee"]}
         print(f"emcee fit (seed {seed}): {kwargs['nwalkers']} walkers x "
               f"{kwargs['niter']} iterations")
-        return fit_model(obs, model, sps, emcee=True, dynesty=False,
-                         progress=True, **kwargs)
+        return fit_model(obs, model, sps, noise=noise, emcee=True,
+                         dynesty=False, progress=True, **kwargs)
 
     import dynesty
     from prospect.fitting.fitting import lnprobfn, wrap_lnp
@@ -104,8 +127,7 @@ def run_sampler(
     if "nested_target_n_effective" in kwargs:
         run_kwargs["n_effective"] = kwargs["nested_target_n_effective"]
 
-    lnp = wrap_lnp(lnprobfn, obs, model, sps, noise=(None, None),
-                   nested=True)
+    lnp = wrap_lnp(lnprobfn, obs, model, sps, noise=noise, nested=True)
     dsampler = dynesty.DynamicNestedSampler(
         lnp, model.prior_transform, model.ndim,
         bound=kwargs.get("nested_bound", "multi"),

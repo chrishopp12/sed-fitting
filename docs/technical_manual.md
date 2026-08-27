@@ -471,6 +471,15 @@ reports the floor that was actually applied.
 fit outright: fewer surviving bands than that and `apply_policy`
 raises.
 
+#### `spectrum.py`
+The observed-spectrum input for joint fits: `read_spectrum` enforces the
+file contract (§6.6) and reads the bytes exactly once, returning a
+`Spectrum` whose sha256 enters the run identity;
+`apply_spectrum_policy` mirrors `policy.py` for the spectrum —
+magnification, the clamped fractional floor, and the config's
+`mask_windows` on top of the file's own mask. Light-stack: no
+`prospect` import, so the layering test covers it.
+
 #### `fitconfig.py`
 Strict parsing, defaulting, and resolution of a fit configuration, plus
 the hash projection. `parse_fit_config` refuses unknown keys, validates every vocabulary,
@@ -621,12 +630,12 @@ the grid start (eazy-py 0.8.6).
 
 | Module | Role |
 |---|---|
-| `obs.py` | Converts the policy's microjansky vectors to maggies and builds the sedpy filter list. |
+| `obs.py` | Converts the policy's microjansky vectors to maggies and builds the sedpy filter list; attaches a prepared spectrum when the config declares one. |
 | `exact_filter.py` | A `Filter` subclass whose default projection is redirected to the fixed-grid `obj_counts_lores`. |
-| `model.py` | Builds the `SpecModel` and the SPS object; asserts the live FSPS library against the config. |
-| `fitting.py` | Runs dynesty or emcee with a recorded seed and checkpointing. |
+| `model.py` | Builds the `SpecModel` (or `PolySpecModel` for joint fits) and the SPS object; asserts the live FSPS library against the config. |
+| `fitting.py` | Runs dynesty or emcee with a recorded seed and checkpointing; builds the spectral noise model when jitter is configured. |
 | `results.py` | Loads an h5, detects the sampler, flattens the chain, rebuilds the model. |
-| `plots.py` | Corner, trace, and SED figures. |
+| `plots.py` | Corner, trace, and SED figures, plus the spectrum-fit figure on joint fits. |
 
 **The exact-filter fence.** sedpy's default high-resolution projection
 quantizes onto its own grid; for ordinary broadbands the two projections
@@ -644,6 +653,26 @@ from `agebins`). The continuity builder orders them explicitly.
 `assert_stellar_library` compares it against the live FSPS build at fit
 start. FSPS's spectral library is a compile-time choice, so a mismatched
 environment is a silent scientific error unless caught here.
+
+**Joint photometry+spectrum fits.** A `prospector.spectrum` config block
+names a prepared spectrum file (see §6.6 for the contract) and turns the
+fit joint: `core/spectrum.py` reads and validates the file, `build_obs`
+fills the obs dictionary's `wavelength`/`spectrum`/`unc`/`mask` keys
+(microjanskys to maggies, the shared `mu_lensing` divided out, the
+block's `err_floor` and `mask_windows` applied), and `build_model`
+returns the `PolySpecModel` concretion, whose maximum-likelihood
+Chebyshev calibration vector (order `polyorder`) absorbs the smooth
+ratio between the observed spectrum and the model — aperture losses and
+flux-calibration drift — so the spectrum constrains features while the
+photometry anchors the absolute scale. Smoothing is always declared
+explicitly (`smooth_sigma_prior`/`smooth_sigma_init` or
+`smooth_sigma_fixed`, km/s): prospect silently smooths by 100 km/s when
+`sigma_smooth` is absent, so absence is never allowed to choose the
+physics. `jitter_prior` frees a `spec_jitter` multiplier on the spectral
+uncertainty through an uncorrelated noise model; `outlier_prior` frees
+an `f_outlier_spec` mixture fraction (with fixed `nsigma_outlier_spec`)
+that de-weights channels the model cannot reach. A photometry-only
+config builds exactly the objects it always did.
 
 ### 4.6 Analysis (`sedfit/analysis/`)
 
@@ -746,6 +775,10 @@ detected — rebuild deliberately when the photometry moves.
     # prospector adds:
     result.h5               chain, model stamps, run_params
     checkpoint.save         dynesty only; kept after a successful run
+    # joint fits add:
+    spectrum.csv            the spectrum, byte-for-byte
+    spectrum.provenance.json   its preparation sidecar, copied
+    plots/spectrum_fit.png  observed vs calibrated model, chi, calibration
 ```
 
 The directory carries everything a re-render needs except the band
@@ -786,11 +819,14 @@ phot_sha256_16, config_sha256_16, bandpass_sha256_16
 spherex_tophat_samples
 bands_include, err_floor, mu_lensing, z_ref
 templates      {n, set_sha256_16, source}        (eazy)
+spectrum_sha256_16, n_spec_channels, n_spec_fit  (joint fits)
 status         "ok" | "failed"
 estimates      eazy:       {zred_p50, zred_p16, zred_p84,
                             z_ml, z_chi2, chi2_best}
                prospector: {zred_p16, zred_p50, zred_p84,
-                            logmass_p16, logmass_p50, logmass_p84}
+                            logmass_p16, logmass_p50, logmass_p84;
+                            joint fits add sigma_smooth, spec_jitter,
+                            f_outlier_spec percentiles when free}
 n_bands_table, n_bands_fit, n_excluded, n_low_snr, n_qa_rejected
 included, excluded_by_set, low_snr, qa_rejected, warnings
 error          present only on failure
@@ -809,11 +845,12 @@ completed one.
 sha256(phot_bytes), registry.bandpass_hash())`.
 
 **In** the hash: every scientific config field, the photometry bytes,
-the per-band bandpass digests, and the per-file template and TEF content
-digests.
+the per-band bandpass digests, the per-file template and TEF content
+digests, and — on joint fits — the spectrum file's content digest.
 
 **Out** of the hash: `name`, `n_proc`, `templates`, `template_pattern`,
-`tef_file` — these locate curves or tune execution. Identical curves
+`tef_file`, `prospector.spectrum.file` — these locate curves or tune
+execution. Identical curves
 under any path therefore share one identity, which is what lets a config
 name a packaged template set rather than an absolute path. Note the
 asymmetry on `template_pattern`: the pattern string is stripped, but the
@@ -871,6 +908,14 @@ there in the same edit if it is new — and a band name may not begin with
 the SPHEREx channel prefix. Note that `bandpass_hash()` is a global
 digest, so adding a band changes every subsequent `run_id`.
 
+When the new bands serve a different campaign, prefer a **campaign
+registry** instead: a separate registry JSON passed as `--registry` to
+`roster`, `build`, `fit`, `plot` and `manifest` (the Python API takes
+`load_registry(path)`). Each campaign then owns its band identities, and
+editing one never re-keys the other's runs. Use the same registry for
+every verb of a campaign — the build sidecar's per-band hashes are
+cross-checked at fit time.
+
 ### 6.2 Adding a provider
 
 Add a token and its prefix to `sources.SOURCE_PREFIXES`. The prefix must
@@ -909,11 +954,31 @@ directory, and returns an `estimates` dict. Adding one is not a single
 registration — the backend name is branched on in several places, and
 two of them currently fall through to Prospector rather than erroring:
 
-- `fitconfig.py`: `BACKENDS`, `TOP_KEYS`, a `_parse_<backend>` block
-  wired into `parse_fit_config`, and the `other = "prospector" if
-  backend == "eazy" else "eazy"` exclusion, which assumes exactly two;
-- `jobs.py`: `_backend_versions` and the `run_job` dispatch — **both
-  else-branches route to Prospector today**;
+- `fitconfig.py`: `BACKENDS` and a `_parse_<backend>` block wired into
+  `parse_fit_config`. The two-backend assumptions here were fixed on
+  2026-08-25: `TOP_KEYS` is now `TOP_KEYS_BASE + BACKENDS`, the exclusion
+  rejects every non-selected block rather than one named "other", and the
+  dispatch raises instead of falling through to Prospector. Adding a name to
+  `BACKENDS` is now enough for the key allowance and the exclusion;
+- `fitconfig.py`: a `USES_PHOTOMETRY` entry saying whether the backend reads
+  a built photometry table. False makes `parse_fit_config` refuse the
+  photometry-only top-level fields (`bands_include`, `min_valid_bands`,
+  `min_snr_broadband`, `err_floor`, `qa_gates`) when written and null them
+  otherwise, so they drop out of canonical JSON instead of carrying their
+  photometry defaults into the run identity. A test asserts the entry exists;
+- `fitconfig.py` again: an `EXECUTION_ONLY` entry, which strips the block's
+  path-valued fields from the identity hash. The table is keyed by the path
+  from the config root — `()` is the root, `("prospector", "spectrum")` a
+  nested block — and a test asserts every name in `BACKENDS` appears, so a
+  missing entry fails rather than silently hashing machine paths as literal
+  strings and forking every `run_id` when the repo moves;
+- `jobs.py`: `_backend_versions` and the `run_job` dispatch. Fixed 2026-08-25 —
+  the four branches (those two plus `plan_job`'s digests and `run_job`'s
+  manifest row) named no backend and fell through to Prospector; each now
+  raises `_undispatchable`, and `plan_job` refuses an unknown backend before
+  it reads photometry or stages anything. Until a backend is added to those
+  four branches it is refused, by name, with a message rather than a
+  `TypeError` from deep inside `apply_policy`;
 - `batch.py`: `MAX_WORKERS_BY_BACKEND`;
 - `__main__.py`: the `plot` verb's branch.
 
@@ -923,6 +988,135 @@ forbids `core/` and `analysis/` from importing `eazy`, `prospect` or
 import inside a function body fails it exactly as a top-level one does.
 Note it does not forbid `core/` importing
 `sedfit.backends.*` — that layering is a convention, not a test.
+
+`backends/linear/` (2026-08-25) is the worked counter-example: a complete
+backend that deliberately **skips** this list. It has the config half — a
+`LINEAR_KEYS` block, `_parse_linear`, and its `EXECUTION_ONLY` and
+`USES_PHOTOMETRY` entries — and then writes its own runs through
+`backends/linear/runner.py` rather than through `jobs.py`, because `jobs.py`
+gates on photometry at five points and a spectrum-only fit has no photometry
+table, no roster recipe, and nothing to put in fifteen of the manifest's
+columns. A `linear` config parses, resolves and hashes like any other;
+`plan_job` then refuses it by name. Its shared NNLS solve moved to
+`core/nnls.py` rather than being imported across from `eazy`. Its `linear`
+block covers every term of the model equation, `transmission` included — a
+backend whose config cannot reach one of its own terms is a trap, and that
+one silently defaulted to ones until review caught it.
+
+The cost of that split is that linear runs are absent from the central
+manifest and from `sedfit fit` / `sedfit batch`. Three seams keep it
+reversible: `provenance.run_id`'s two hashes are optional, `runs.stage_run`
+takes photometry optionally, and `USES_PHOTOMETRY` already marks which
+backends would need conditional gates. See DESIGN.md 16.3, 16.4a and 16.4b.
+
+### 6.6 Fitting an observed spectrum
+
+The Prospector backend fits a spectrum jointly with the photometry when
+the config's prospector block carries a `spectrum` object. The package
+deliberately owns none of the spectrum's preparation — flux calibration,
+telluric handling, error inflation, frame conversion and quality masking
+happen in target-specific tooling — and consumes one prepared file:
+
+- a CSV with exactly the columns `wave_A, flux_uJy, flux_err_uJy, mask`:
+  observed-frame **vacuum** wavelengths in Angstroms (FSPS wavelengths
+  are vacuum; feeding air wavelengths misplaces every line), f_nu flux
+  densities in microjanskys, and a 0/1 fit-inclusion mask. Masked
+  channels may be non-finite; unmasked ones may not.
+- a required sidecar `<stem>.provenance.json` declaring
+  `"wave_frame": "vacuum"` and `"flux_unit": "uJy"`; everything else in
+  it is free-form preparation provenance, staged verbatim into the run
+  directory.
+
+The config block: `file` (relative paths resolve against the config
+file's directory), `polyorder` (default 12; 0 disables the calibration
+vector), `smooth_sigma_prior`/`smooth_sigma_init` or
+`smooth_sigma_fixed` [km/s], optional `jitter_prior` (frees
+`spec_jitter`), optional `outlier_prior` + `outlier_nsigma` (frees
+`f_outlier_spec`), `err_floor` (fractional, on the spectrum),
+`mask_windows` (observed-frame vacuum `[lo, hi]` intervals excluded on
+top of the file's mask — analysis choices, where the file mask records
+data quality), and optional `eline_sigma_kms` (requires `nebular`):
+turns FSPS's in-spectrum nebular lines off (`nebemlineinspec: false`)
+and has prospect draw them at this fixed total width instead. FSPS
+inserts lines at a library-resolution convention width that need not
+match the data; when line profiles carry information, set this to the
+measured intrinsic-plus-instrumental width. Band predictions still
+receive the line fluxes through `nebline_photometry`. A null `spectrum` (the default) leaves every existing
+photometry-only identity untouched, because canonical JSON drops null
+keys; the file's path is execution-only while its content digest enters
+`run_id`.
+
+### 6.7 A blind redshift from a spectrum alone
+
+`backends/linear` solves for redshift with no photometry and no input
+redshift. Four config blocks turn that into a usable blind fitter; each is
+null by default, so a config that omits them keeps the identity it had.
+
+**`gas`** adds emission lines as extra NNLS columns, built analytically as
+Gaussians at observed wavelength rather than resampled from files or baked
+into nebular-on SSPs. Against an absorption-only basis a blue emission-line
+galaxy fits to the wrong redshift *silently* — the sigma clip then deletes
+the lines, which were the only redshift information in the spectrum. Fields:
+`lines` (**required**, a packaged list name such as `optical`, or a path — a
+short list is silent, so there is no default), `sigma_kms` (the nebular
+width, fixed rather than free: a symmetric kernel does not move a line
+centroid, so the redshift is insensitive to it at first order while the
+amplitude is not), and `ratio_locked` (groups entering as **one** column at a
+ratio atomic physics fixes — [OIII] 5007/4959 = 2.98 and [NII] 6584/6548 =
+3.05 by default; Balmer lines stay free, because the decrement is a dust
+measurement). Line fluxes are reported in `gas_fluxes`, apart from
+`light_fractions`: an amplitude on a unit-integrated line column is a flux,
+not a share of a continuum. Gas columns count in `dof` whether or not they
+take amplitude.
+
+**`lsf`** and **`template_resolution`** supply the instrument line spread and
+the basis's own resolution. The kernel is the quadrature *difference*,
+
+    sigma_kernel(l_obs)^2 = sigma_LSF(l_obs)^2 - [sigma_lib(l_obs/(1+z)) * (1+z)]^2
+
+applied in the observed frame on the design matrix, after the redshift shift.
+Both blocks share one shape: exactly one of `constant` or `file`, a `unit`
+from `R`, `fwhm_A`, `sigma_A`, `fwhm_kms`, `sigma_kms`, and `wave_frame` when
+it is a file. `template_resolution` is required whenever `lsf` is set, and
+its `file` accepts a packaged set name, resolving to the `resolution.txt`
+that set ships. A constant-R LSF against a constant-R library gives one
+velocity width, which folds into the cached rest-frame broadening for free;
+anything else becomes a per-pixel convolution on the spectrum's own grid.
+Ignoring a real LSF folds the instrument into the reported dispersion — 80
+km/s intrinsic reads as ~93 behind a rising R = 1500 to 4000 — while leaving
+the redshift alone.
+
+`lsf.on_undersampled` has **no default**, because neither shipped set can be
+matched to MUSE over roughly half the band and all three answers are
+defensible: `raise` refuses, naming the wavelengths and the redshift;
+`degrade_data` smooths the data up to the library resolution (a normalized
+convolution over the fitted channels, with the variance propagated as
+`sum(w^2 v)/sum(w)^2` — the neglected off-diagonal terms are why a degraded
+run's chi-square does not compare with an undegraded one's, and it refuses
+outright when the library's velocity width moves with redshift, as a
+constant-FWHM library's does); `ignore` leaves both alone, which costs the
+dispersion and not the redshift.
+
+**`scan`** runs the two-stage blind scan: a coarse pass at
+`n_poly_iter_coarse` and one representative sigma, then `fit_spectrum`
+unmodified over a `window_steps`-wide window of the configured grid. A
+single-stage scan at production settings over a wide redshift range is tens
+of thousands of evaluations. `z_step_coarse` defaults to **null, meaning
+derived from the basis** rather than fixed: with gas present the narrowest
+feature is a line rather than a stellar absorption trough, and half a coarse
+step must stay inside one line width. The scan returns its coarse grid and
+ranked minima separately from the fit, so a coarse chi-square and a final one
+never share a field.
+
+Every fit — scanned or not — now keeps the grid it scanned and reports the
+distinct local minima with their `delta_chi2` to the winner. A catastrophic
+redshift is a minimum-selection failure, which the Hessian error cannot
+express: it states the precision of the minimum the fit landed in, not
+whether that was the right one. Distinctness is a **velocity** separation,
+`|dz|/(1+z) > dv/c`, default 1000 km/s. `delta_chi2` is a discriminant, not a
+probability — the variance is diagonal and a spectrum is thousands of
+correlated channels, so any threshold gating a catalog must be calibrated
+against a truth sample first.
 
 ---
 

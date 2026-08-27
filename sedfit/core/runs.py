@@ -15,7 +15,9 @@ live ones requires force.
 
 Data products:
   <backend_dir>/<run_id[-label]>/
-      config.json  phot.csv  phot.provenance.json  manifest.json  plots/
+      config.json  manifest.json  plots/
+      phot.csv  phot.provenance.json          (a photometry backend)
+      spectrum.csv  spectrum.provenance.json  (whenever a spectrum is fit)
   <manifest_path>          one JSON row appended per finalized run
 
 Requirements:
@@ -99,12 +101,15 @@ def stage_run(
         run_id: str,
         *,
         config: dict,
-        phot_bytes: bytes,
-        phot_sha256: str,
-        sidecar: dict,
         machinery: dict,
+        phot_bytes: bytes | None = None,
+        phot_sha256: str | None = None,
+        sidecar: dict | None = None,
         label: str | None = None,
         force: bool = False,
+        spectrum_bytes: bytes | None = None,
+        spectrum_sha256: str | None = None,
+        spectrum_sidecar: dict | None = None,
     ) -> Path:
     """Create the run directory with its skeleton; returns the final path.
 
@@ -112,18 +117,26 @@ def stage_run(
     ----------
     config : dict
         The fully resolved config (echoed verbatim as config.json).
-    phot_bytes, phot_sha256 : bytes, str
-        The photometry file bytes (read exactly once by the caller) and
-        their sha256; the written copy is re-hashed as a self-check.
-    sidecar : dict
-        The build provenance sidecar to copy alongside the photometry.
+    phot_bytes, phot_sha256, sidecar : optional
+        The photometry file bytes (read exactly once by the caller),
+        their sha256, and the build provenance sidecar; the written copy
+        is re-hashed as a self-check. None for a backend that fits no
+        photometry table, which then writes no phot.csv. [default: None]
     machinery : dict
         Live machinery stamps (MACHINERY_KEYS subset); compared against
         an existing run's stamps for the overwrite guard.
     force : bool
         Allow replacing an existing run whose machinery stamps differ.
         [default: False]
+    spectrum_bytes, spectrum_sha256, spectrum_sidecar : optional
+        A joint fit's spectrum file bytes, their sha256 (self-checked
+        like the photometry), and its provenance sidecar; staged as
+        spectrum.csv and spectrum.provenance.json. [default: None]
     """
+    if phot_bytes is None and spectrum_bytes is None:
+        raise ValueError("stage_run needs photometry, a spectrum, or both; a "
+                         "run directory describing neither is not a record "
+                         "of anything")
     backend_dir = Path(backend_dir)
     backend_dir.mkdir(parents=True, exist_ok=True)
 
@@ -148,17 +161,30 @@ def stage_run(
 
     (staging / "config.json").write_text(
         json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    (staging / "phot.csv").write_bytes(phot_bytes)
-    written = sha256_bytes((staging / "phot.csv").read_bytes())
-    if written != phot_sha256:
-        shutil.rmtree(staging)
-        raise ValueError(f"phot.csv hash mismatch after write: {written} != "
-                         f"{phot_sha256}")
-    (staging / "phot.provenance.json").write_text(
-        json.dumps(sidecar, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if phot_bytes is not None:
+        (staging / "phot.csv").write_bytes(phot_bytes)
+        written = sha256_bytes((staging / "phot.csv").read_bytes())
+        if written != phot_sha256:
+            shutil.rmtree(staging)
+            raise ValueError(f"phot.csv hash mismatch after write: {written} "
+                             f"!= {phot_sha256}")
+        (staging / "phot.provenance.json").write_text(
+            json.dumps(sidecar or {}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8")
+    if spectrum_bytes is not None:
+        (staging / "spectrum.csv").write_bytes(spectrum_bytes)
+        written = sha256_bytes((staging / "spectrum.csv").read_bytes())
+        if written != spectrum_sha256:
+            shutil.rmtree(staging)
+            raise ValueError(f"spectrum.csv hash mismatch after write: "
+                             f"{written} != {spectrum_sha256}")
+        (staging / "spectrum.provenance.json").write_text(
+            json.dumps(spectrum_sidecar or {}, indent=2, sort_keys=True)
+            + "\n", encoding="utf-8")
     (staging / "plots").mkdir()
     stamp = {"run_id": run_id, "status": "staged", "written": now_iso(),
-             "phot_sha256_16": phot_sha256[:16], **machinery}
+             "phot_sha256_16": phot_sha256[:16] if phot_sha256 else None,
+             **machinery}
     (staging / "manifest.json").write_text(
         json.dumps(stamp, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 

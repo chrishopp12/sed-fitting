@@ -51,8 +51,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 from scipy.interpolate import CubicSpline
-from scipy.optimize import nnls
 
+from sedfit.core.nnls import nnls_fit as _nnls_fit
 from sedfit.backends.eazy.fitting import warn_grid_edges, write_catalog
 from sedfit.backends.eazy.results import (
     FitResult,
@@ -295,39 +295,6 @@ def design_cube(zgrid: np.ndarray, templates: list[tuple],
 # ------------------------------------
 # Fitting cores (eazy photoz.py equivalents)
 # ------------------------------------
-
-def _nnls_fit(design: np.ndarray, fnu: np.ndarray, var: np.ndarray,
-              ok_band: np.ndarray
-              ) -> tuple[float, np.ndarray, np.ndarray]:
-    """One NNLS solve, mirroring template_lsq (fitter="nnls").
-
-    Applies eazy's internal per-template renormalization
-    (RENORM_TEMPLATES=y) for conditioning and divides it back out, so the
-    returned coefficients are raw template amplitudes.
-
-    Returns
-    -------
-    chi2 : float
-        Sum over the fitted bands.
-    coeffs : np.ndarray
-        (NTEMP,) raw template amplitudes, renormalization removed.
-    fmodel : np.ndarray
-        (NFILT,) model photometry, all bands.
-    """
-    rms = np.sqrt(var)
-    anorm = np.linalg.norm((design / rms)[:, ok_band], axis=1)
-    ok_temp = anorm > 0
-    anorm[~ok_temp] = 1.0
-    normed = design / anorm[:, None]
-    coeffs = np.zeros(design.shape[0])
-    if ok_temp.any():
-        weighted = (normed / rms).T[ok_band, :]
-        solution, _ = nnls(weighted[:, ok_temp], (fnu / rms)[ok_band])
-        coeffs[ok_temp] = solution
-    fmodel = coeffs @ normed
-    chi2 = float((((fnu - fmodel) ** 2 / var)[ok_band]).sum())
-    return chi2, coeffs / anorm, fmodel
-
 
 def _fit_object_scan(cube: np.ndarray, tefgrid: np.ndarray, fnu: np.ndarray,
                      efnu: np.ndarray, ok_band: np.ndarray, *,

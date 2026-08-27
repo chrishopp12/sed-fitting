@@ -29,6 +29,7 @@ import numpy as np
 
 from sedfit.backends.prospector.exact_filter import make_exact
 from sedfit.core.policy import PolicyResult
+from sedfit.core.spectrum import Spectrum, apply_spectrum_policy
 from sedfit.core.synth import make_spherex_tophat
 
 if TYPE_CHECKING:
@@ -45,6 +46,7 @@ def build_obs(
         policy: PolicyResult,
         *,
         registry: Registry,
+        spectrum: Spectrum | None = None,
     ) -> dict:
     """The Prospector obs dictionary for one policy-applied table.
 
@@ -58,6 +60,11 @@ def build_obs(
         core.policy output; its flux/err vectors are consumed verbatim.
     registry : Registry
         Bandpass authority.
+    spectrum : Spectrum or None
+        core.spectrum.read_spectrum output for a joint fit; the config's
+        spectrum block supplies its policy (err_floor, mask_windows) and
+        the shared mu_lensing is applied to it here, exactly as core
+        policy applies it to the photometry. [default: None]
 
     Returns
     -------
@@ -94,6 +101,21 @@ def build_obs(
         "unc": None,
         "redshift": cfg["z_ref"],
     }
+    if spectrum is not None:
+        spec_cfg = cfg["prospector"]["spectrum"]
+        flux, err, mask = apply_spectrum_policy(
+            spectrum,
+            mu_lensing=cfg["mu_lensing"],
+            err_floor=spec_cfg["err_floor"],
+            mask_windows=spec_cfg["mask_windows"])
+        if int(mask.sum()) <= spec_cfg["polyorder"]:
+            raise ValueError(
+                f"{int(mask.sum())} unmasked channels cannot constrain a "
+                f"polyorder-{spec_cfg['polyorder']} calibration polynomial")
+        obs["wavelength"] = spectrum.wave_A.copy()
+        obs["spectrum"] = flux / UJY_PER_MAGGIE
+        obs["unc"] = err / UJY_PER_MAGGIE
+        obs["mask"] = mask
     obs = fix_obs(obs)
     if exact:                       # fix_obs may rebuild the filter list
         make_exact(obs["filters"])

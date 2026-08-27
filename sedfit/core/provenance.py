@@ -19,7 +19,9 @@ Notes:
     other type are hard errors.
   - run_id: first RUN_ID_HEX_LEN hex digits of sha256 over the canonical
     JSON of {"config": config, "phot": phot_sha256,
-    "bandpass": bandpass_sha256}.
+    "bandpass": bandpass_sha256}. A null hash drops out of the canonical
+    form entirely, which is what lets a spectrum-only backend pass None
+    for both without perturbing any photometry run's identity.
 """
 
 from __future__ import annotations
@@ -110,17 +112,24 @@ def sha256_file(path: str | Path) -> str:
     return sha256_bytes(Path(path).read_bytes())
 
 
-def run_id(config: object, phot_sha256: str, bandpass_sha256: str) -> str:
-    """Run identity from the three scientific inputs.
+def run_id(config: object, phot_sha256: str | None = None,
+           bandpass_sha256: str | None = None) -> str:
+    """Run identity from the scientific inputs a backend actually has.
 
     Parameters
     ----------
     config : object
         Hash-projected resolved fit config (canonical-JSON-able).
-    phot_sha256 : str
-        sha256 hex of the photometry file bytes.
-    bandpass_sha256 : str
-        sha256 hex over the resolved registry and bandpass arrays.
+    phot_sha256 : str or None
+        sha256 hex of the photometry file bytes; None for a backend that
+        fits no photometry table. [default: None]. A photometry-less
+        identity cannot collide with a photometry one, and not because
+        the payloads have different shapes: `backend` is inside the
+        hashed config, so the two can never produce the same `config`
+        value. Null-dropping is belt and braces on top of that.
+    bandpass_sha256 : str or None
+        sha256 hex over the resolved registry and bandpass arrays; None
+        when no bandpass enters the fit. [default: None]
 
     Returns
     -------

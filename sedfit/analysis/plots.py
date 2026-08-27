@@ -44,8 +44,9 @@ SED_XTICKS = [1e3, 2e3, 3e3, 5e3, 1e4, 2e4, 3e4, 5e4, 1e5, 2e5]
 class SEDPlotData:
     """Everything the unified figure needs, in plain arrays.
 
-    curves are (wave_AA, fnu_uJy, label) model spectra; instruments are
-    per-band registry instruments (the producer resolves them).
+    curves are (wave_AA, fnu_uJy, label[, style]) spectra, where the
+    optional style dict overrides the default line styling; instruments
+    are per-band registry instruments (the producer resolves them).
     """
     title: str
     bands: list[str]
@@ -76,19 +77,29 @@ def apply_sed_xaxis(ax, wave) -> None:
 
 
 def _apply_yaxis(ax, flux, model, curves, pad=3.0) -> None:
+    """Log y-limits from the photometry and curves in view.
+
+    The floor pads below the curves' 1st percentile, which keeps a
+    noisy spectrum's downward excursions from dragging the axis; the
+    ceiling sits 1.5x above the true maximum, so narrow emission lines
+    stay inside the frame instead of clipping at a percentile of a
+    mostly-continuum grid.
+    """
     lo, hi = ax.get_xlim()
     values = [np.asarray(flux, float), np.asarray(model, float)]
-    for wave, fnu, _ in curves:
+    for curve in curves:
+        wave, fnu = curve[0], curve[1]
         inview = (np.asarray(wave) >= lo) & (np.asarray(wave) <= hi)
         spec = np.asarray(fnu, float)[inview]
         spec = spec[np.isfinite(spec) & (spec > 0)]
         if spec.size:
-            values.append(np.percentile(spec, [1, 99]))
+            values.append(np.percentile(spec, 1))
+            values.append(spec.max())
     stacked = np.concatenate([np.atleast_1d(v) for v in values])
     stacked = stacked[np.isfinite(stacked) & (stacked > 0)]
     ax.set_yscale("log")
     if stacked.size:
-        ax.set_ylim(stacked.min() / pad, stacked.max() * pad)
+        ax.set_ylim(stacked.min() / pad, stacked.max() * 1.5)
 
 
 # ------------------------------------
@@ -121,9 +132,12 @@ def sed_figure(data: SEDPlotData, *, save_path: str | Path) -> Path:
                              sharex=True)
 
     ax = axes[1]
-    for curve_wave, curve_fnu, label in data.curves:
-        ax.plot(curve_wave, curve_fnu, color="firebrick", lw=0.8, alpha=0.8,
-                label=label)
+    for curve in data.curves:
+        curve_wave, curve_fnu, label = curve[0], curve[1], curve[2]
+        style = {"color": "firebrick", "lw": 0.8, "alpha": 0.8}
+        if len(curve) > 3:
+            style.update(curve[3])
+        ax.plot(curve_wave, curve_fnu, label=label, **style)
     for inst in dict.fromkeys(instruments):
         m = instruments == inst
         is_sx = inst == "SPHEREx"
