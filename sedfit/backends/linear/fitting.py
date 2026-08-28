@@ -25,6 +25,7 @@ from scipy.optimize import minimize
 
 from sedfit.backends.linear.basis import C_KMS, TemplateBasis
 from sedfit.backends.linear.gas import GasBasis
+from sedfit.backends.linear.physics import check_ratios, velocity_floor_kms
 from sedfit.core.nnls import nnls_fit
 
 # Amplitude of the template sum below which a pixel is dropped from the
@@ -181,6 +182,25 @@ class LinearFit:
         """Line fluxes, in the fit's flux unit times Angstrom, zeros kept."""
         return {name: float(a) for name, a in
                 zip(self.gas_names, self.amplitudes[len(self.names):])}
+
+    @property
+    def physics_violations(self) -> list:
+        """Physical bounds the fitted line set does not respect.
+
+        Derived from `gas_fluxes`, so it changes no fitted value and an
+        empty list means nothing was CHECKABLE, not that all is well.
+        """
+        return check_ratios(self.gas_fluxes)
+
+    @property
+    def velocity_floor_kms(self) -> float | None:
+        """Worst rest-wavelength floor among the lines carrying flux.
+
+        This fit weights every line alike, so a velocity from it cannot beat
+        its worst-known line.
+        """
+        return velocity_floor_kms(
+            [n for n, f in self.gas_fluxes.items() if f > 0])
 
 
 @dataclass(frozen=True)
@@ -390,6 +410,15 @@ def fit_spectrum(wave_vac: np.ndarray, flux: np.ndarray, error: np.ndarray,
     z_err = s_err = None
     if errors:
         z_err, s_err = _hessian_errors(redshift, sigma, chi2, dof, cost)
+    if pinned:
+        # A dispersion held at a bound is not a stationary point in sigma at
+        # all -- chi2 is still descending when the bound stops it -- so the
+        # Hessian there measures curvature where no extremum exists. Whether
+        # that returns nan or a plausible number is decided by the SIGN of a
+        # second difference 14 orders of magnitude below the redshift
+        # curvature, i.e. by rounding. The finite branch is the dangerous
+        # one: it looks quotable. Report neither.
+        s_err = None
     return LinearFit(redshift=float(redshift), sigma_kms=float(sigma),
                      chi2=float(chi2), dof=dof, amplitudes=amps,
                      chebyshev_coefficients=coefficients, model=model,

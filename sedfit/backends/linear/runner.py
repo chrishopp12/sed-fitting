@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import platform
+import warnings
 from dataclasses import asdict
 from pathlib import Path
 
@@ -167,6 +168,51 @@ def build_gas(linear_cfg: dict) -> GasBasis | None:
                     ratio_locked=gas_cfg["ratio_locked"])
 
 
+def band_coverage(gas, wave_vac: np.ndarray,
+                  z_min: float, z_max: float) -> dict:
+    """What the spectrum's own range does to the gas basis over a scan.
+
+    A ratio lock is not a property of the package, it is a property of a
+    LINE LIST AGAINST A BAND: tying two lines constrains nothing unless both
+    are observable. With one member permanently outside the range the lock
+    silently becomes a free column whose amplitude is reported as a total
+    doublet flux extrapolated through an assumed ratio -- a free parameter
+    with a misleading name. `[SIII]` does exactly this on MUSE, where 9531
+    sits past the red edge at every redshift.
+
+    Reported, never refused: which redshifts a caller scans is theirs, and a
+    group inert over part of a range is still correct over the rest.
+    """
+    if gas is None:
+        return {}
+    low, high = float(wave_vac.min()), float(wave_vac.max())
+    groups = {}
+    for name, component in zip(gas.names, gas.components):
+        if len(component) < 2:
+            continue
+        spans = []
+        for rest, _ in component:
+            lo = max(z_min, low / rest - 1.0)
+            hi = min(z_max, high / rest - 1.0)
+            spans.append((lo, hi) if hi > lo else None)
+        live = [s for s in spans if s is not None]
+        complete = None
+        if len(live) == len(component):
+            both_lo = max(s[0] for s in live)
+            both_hi = min(s[1] for s in live)
+            if both_hi > both_lo:
+                complete = (both_lo, both_hi)
+        groups[name] = {
+            "members": len(component),
+            "members_ever_in_band": len(live),
+            "both_in_band_over": (None if complete is None
+                                  else [round(complete[0], 4),
+                                        round(complete[1], 4)]),
+            "inert": complete is None,
+        }
+    return groups
+
+
 def build_basis(linear_cfg: dict, paths: list[Path]) -> TemplateBasis:
     """The TemplateBasis a linear config describes."""
     wave_range = tuple(linear_cfg["template_wave_range"])
@@ -249,8 +295,19 @@ def plan(resolved: dict, spectrum: Spectrum) -> dict:
     digests = content_digests(paths, spectrum, transmission_cfg, linear["gas"],
                               resolution_paths(linear))
     rid = make_run_id(hash_projection(resolved, digests=digests))
+    coverage = band_coverage(gas, wave_vac, float(linear["z_min"]),
+                             float(linear["z_max"]))
+    for name, info in coverage.items():
+        if info["inert"]:
+            warnings.warn(
+                f"ratio-locked group {name!r} never has both members in "
+                f"{wave_vac.min():.1f}-{wave_vac.max():.1f} A over z "
+                f"{linear['z_min']}-{linear['z_max']}: the lock constrains "
+                f"nothing and its reported flux is extrapolated through an "
+                f"assumed ratio. Drop it from gas.ratio_locked.",
+                RuntimeWarning, stacklevel=2)
     return {"linear": linear, "paths": paths, "basis": basis, "gas": gas,
-            "lsf": lsf,
+            "lsf": lsf, "band_coverage": coverage,
             "digests": digests, "run_id": rid, "wave_vac": wave_vac,
             "flux": flux, "error": error, "fitted": fitted,
             "poly_wave": poly_wave, "poly_domain": poly_domain,
@@ -320,7 +377,13 @@ def run(
         "gas": (None if linear["gas"] is None
                 else {"lines": linear["gas"]["lines"],
                       "n_columns": prepared["gas"].n_columns,
-                      "sigma_kms": linear["gas"]["sigma_kms"]}),
+                      "sigma_kms": linear["gas"]["sigma_kms"],
+                      "band_coverage": prepared["band_coverage"]}),
+        # A dispersion fitted under "ignore" is absorbing an instrument term
+        # it cannot model, so it is uninterpretable whether or not it reached
+        # a bound. sigma_pinned catches the bound; this catches the reason.
+        "lsf_on_undersampled": (None if linear["lsf"] is None
+                                else linear["lsf"]["on_undersampled"]),
         "flux_unit": FLAM_UNIT,
         "status": "failed", "estimates": None,
     }
@@ -416,6 +479,16 @@ def write_fit(run_dir: str | Path, fit, prepared: dict, scan=None) -> None:
             "delta_chi2": scan.delta_chi2,
             "minima": [asdict(m) for m in scan.minima]},
         "flux_unit": FLAM_UNIT,
+        "sigma_pinned": fit.sigma_pinned,
+        # Reported, not enforced: an empty list means nothing was CHECKABLE,
+        # not that the line set is sound.
+        "physics_violations": [
+            {"kind": v.kind, "lines": list(v.lines), "observed": v.observed,
+             "bound": v.bound, "detail": v.detail}
+            for v in fit.physics_violations],
+        "velocity_floor_kms": fit.velocity_floor_kms,
+        "n_gas_lines_in_band": sum(
+            1 for f in fit.gas_fluxes.values() if f > 0),
         "amplitudes": {name: float(a)
                        for name, a in zip(fit.names, fit.stellar_amplitudes)},
         "light_fractions": fit.light_fractions,
