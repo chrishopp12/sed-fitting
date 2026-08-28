@@ -192,3 +192,38 @@ def test_a_real_continuum_is_not_reported_as_empty(small_basis) -> None:
                          clip_sigma=None)
     assert fit.stellar_basis_empty is False
     assert fit.light_fractions
+
+
+def test_lines_on_a_negative_continuum_still_get_a_redshift(small_basis) -> None:
+    """The guard must RECOVER the science, not merely avoid the crash.
+
+    An emission-line object with an over-subtracted background is the case
+    the guard exists for: a blind survey of a lensing field is enriched in
+    exactly these, since lensed background sources are the faint high-EW
+    objects that have lines and no continuum.
+    """
+    from sedfit.backends.linear import fitting as F
+    from sedfit.backends.linear.gas import (
+        GasBasis, read_line_list, resolve_line_list)
+    lines = read_line_list(resolve_line_list("optical"))
+    gas = GasBasis(lines, sigma_kms=60.0)
+    wave = np.arange(4750.0, 9350.0, 1.25)
+    rng = np.random.default_rng(9)
+    truth = 0.1840
+    flux = np.full_like(wave, -0.06)
+    for name in ("Hbeta", "[OIII]4959", "[OIII]5007"):
+        centre = lines[name] * (1 + truth)
+        flux += 7.0 * np.exp(-0.5 * ((wave - centre) / 1.4) ** 2)
+    err = np.ones_like(wave)
+    fit = F.fit_spectrum(wave, flux + rng.normal(0, 1.0, wave.size), err,
+                         np.ones_like(flux, bool), small_basis,
+                         redshift_grid=np.arange(0.10, 0.30, 4e-4),
+                         sigma_grid=np.array([150.0]), poly_order=8,
+                         poly_domain=(wave[0], wave[-1]), gas=gas,
+                         errors=False, clip_sigma=None)
+    assert abs(fit.redshift - truth) / (1 + truth) * 299792.458 < 50.0
+    assert fit.stellar_basis_empty is True
+    # And the polynomial was left alone rather than fitted to the line
+    # pixels: order 8 on a few clustered windows of a wide domain
+    # extrapolates by four orders of magnitude everywhere else.
+    assert abs(fit.chebyshev_coefficients).max() == pytest.approx(1.0)

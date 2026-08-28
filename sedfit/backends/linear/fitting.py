@@ -291,6 +291,15 @@ def fit_at(redshift: float, sigma_kms: float, wave_vac: np.ndarray,
         # scan most trial redshifts put no line under the gas columns either.
         # A polynomial needs poly_order + 1 points; with fewer, there is no
         # continuum to correct and the honest move is to leave it alone.
+        # The polynomial corrects a CONTINUUM. With no stellar amplitude
+        # there is no continuum to correct, and the pixels that survive the
+        # floor are the emission lines alone -- a few clustered windows of a
+        # wide domain. Fitting order-8 to those and evaluating it everywhere
+        # extrapolates by four orders of magnitude. Leave the polynomial at
+        # whatever it was; the gas columns still fit the lines, which is the
+        # whole of what such a spectrum has to offer.
+        if not bool((amps[:basis.n_templates] > 0).any()):
+            break
         if int(good.sum()) <= poly_order:
             break
         ratio = np.where(star > 0, flux / np.where(star > 0, star, 1.0), 1.0)
