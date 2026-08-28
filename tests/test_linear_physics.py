@@ -227,3 +227,60 @@ def test_lines_on_a_negative_continuum_still_get_a_redshift(small_basis) -> None
     # pixels: order 8 on a few clustered windows of a wide domain
     # extrapolates by four orders of magnitude everywhere else.
     assert abs(fit.chebyshev_coefficients).max() == pytest.approx(1.0)
+
+
+def test_an_empty_basis_does_not_take_the_error_estimator_down(
+        small_basis) -> None:
+    """sigma has nothing to act on, so the 2x2 is singular, not merely ill-
+    conditioned.
+
+    `sigma_kms` broadens the STELLAR templates; the gas columns carry their
+    own fixed width and never see the fitted value. With every stellar
+    amplitude at zero, chi2 is exactly independent of sigma -- verified
+    bit-identical from 246 to 400 km/s -- so `fss` and `fzs` are zero and
+    `np.linalg.inv` raises. The redshift is still measured, and its error is
+    the 1x1 problem it always was.
+    """
+    from sedfit.backends.linear import fitting as F
+    from sedfit.backends.linear.gas import (
+        GasBasis, read_line_list, resolve_line_list)
+    lines = read_line_list(resolve_line_list("optical"))
+    gas = GasBasis(lines, sigma_kms=60.0)
+    wave = np.arange(4750.0, 9350.0, 1.25)
+    rng = np.random.default_rng(9)
+    truth = 0.1840
+    flux = np.full_like(wave, -0.19)
+    for name in ("Hbeta", "[OIII]4959", "[OIII]5007"):
+        centre = lines[name] * (1 + truth)
+        flux += 7.0 * np.exp(-0.5 * ((wave - centre) / 1.4) ** 2)
+    err = np.ones_like(wave)
+    # errors ON: this is the path that used to raise LinAlgError.
+    fit = F.fit_spectrum(wave, flux + rng.normal(0, 1.0, wave.size), err,
+                         np.ones_like(flux, bool), small_basis,
+                         redshift_grid=np.arange(0.10, 0.30, 4e-4),
+                         sigma_grid=np.array([250.0]), poly_order=8,
+                         poly_domain=(wave[0], wave[-1]), gas=gas,
+                         clip_sigma=None)
+    assert fit.stellar_basis_empty is True
+    assert fit.redshift_error is not None and np.isfinite(fit.redshift_error)
+    assert fit.sigma_error is None
+    assert abs(fit.redshift - truth) / (1 + truth) * 299792.458 < 50.0
+
+
+def test_a_singular_hessian_returns_none_rather_than_raising() -> None:
+    from sedfit.backends.linear.fitting import _hessian_errors
+    # A cost surface flat in both directions: nothing to invert.
+    z_err, s_err = _hessian_errors(0.2, 250.0, 100.0, 50, lambda z, s: 100.0)
+    assert z_err is None and s_err is None
+
+
+def test_a_negative_curvature_reports_none_not_nan() -> None:
+    from sedfit.backends.linear.fitting import _hessian_errors
+    # Concave along sigma: the point is not a minimum on that axis, so its
+    # curvature describes no extremum. nan would reach fit.json as a bare
+    # NaN token, which is not valid JSON.
+    def cost(z, s):
+        return 100.0 + 1e10 * (z - 0.2) ** 2 - 1e-3 * (s - 250.0) ** 2
+    z_err, s_err = _hessian_errors(0.2, 250.0, 100.0, 50, cost)
+    assert z_err is not None and np.isfinite(z_err)
+    assert s_err is None

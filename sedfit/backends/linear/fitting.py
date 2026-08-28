@@ -343,15 +343,29 @@ def _polish(redshift: float, sigma_kms: float, cost,
 
 
 def _hessian_errors(redshift: float, sigma_kms: float, chi2_min: float,
-                    dof: int, cost) -> tuple[float, float]:
+                    dof: int, cost, *, sigma_free: bool = True
+                    ) -> tuple[float | None, float | None]:
     """Symmetric 1-sigma errors from the (z, sigma) curvature, chi2/dof scaled.
 
     Not a delta-chi-square profile bound: this inverts the finite-difference
     Hessian, so the errors are symmetric by construction.
+
+    `sigma_free` is False when the dispersion does not enter the model at
+    all. Either error comes back None where the curvature cannot support a
+    number, which is a statement and not a failure.
     """
     dz, ds = 2e-5, 4.0
     fzz = (cost(redshift + dz, sigma_kms) - 2 * chi2_min
            + cost(redshift - dz, sigma_kms)) / dz ** 2
+    scale = np.sqrt(max(chi2_min / dof, 1.0))
+    if not sigma_free:
+        # sigma broadens the STELLAR templates; the gas columns carry their
+        # own fixed width and never see the fitted value. With every stellar
+        # amplitude at zero, chi2 is EXACTLY independent of sigma -- fss and
+        # fzs are zero to machine precision and the 2x2 is singular rather
+        # than ill-conditioned. There is no dispersion here to put an error
+        # on, and the redshift error is the 1x1 problem it always was.
+        return float(np.sqrt(2.0 / fzz) * scale), None
     fss = (cost(redshift, sigma_kms + ds) - 2 * chi2_min
            + cost(redshift, sigma_kms - ds)) / ds ** 2
     fzs = (cost(redshift + dz, sigma_kms + ds)
@@ -359,10 +373,19 @@ def _hessian_errors(redshift: float, sigma_kms: float, chi2_min: float,
            - cost(redshift - dz, sigma_kms + ds)
            + cost(redshift - dz, sigma_kms - ds)) / (4 * dz * ds)
     hessian = 0.5 * np.array([[fzz, fzs], [fzs, fss]])
-    covariance = np.linalg.inv(hessian)
-    scale = np.sqrt(max(chi2_min / dof, 1.0))
-    return (float(np.sqrt(covariance[0, 0]) * scale),
-            float(np.sqrt(covariance[1, 1]) * scale))
+    try:
+        covariance = np.linalg.inv(hessian)
+    except np.linalg.LinAlgError:
+        # A pseudo-inverse would return numbers, and they would be artifacts
+        # of the pseudo-inverse rather than measurements.
+        return None, None
+    # A negative diagonal means the reported point is not a minimum along
+    # that axis, so its curvature describes no extremum. Reporting None is
+    # the honest form; taking the square root would emit a RuntimeWarning
+    # and return nan, which reaches fit.json as a bare NaN token that is not
+    # valid JSON.
+    return tuple(float(np.sqrt(covariance[i, i]) * scale)
+                 if covariance[i, i] > 0 else None for i in (0, 1))
 
 
 def fit_spectrum(wave_vac: np.ndarray, flux: np.ndarray, error: np.ndarray,
@@ -439,9 +462,11 @@ def fit_spectrum(wave_vac: np.ndarray, flux: np.ndarray, error: np.ndarray,
                           sigma_bounds[1] - sigma_bounds[0])
         pinned = bool(sigma <= sigma_bounds[0] + edge
                       or sigma >= sigma_bounds[1] - edge)
+    stellar_empty = not bool((amps[:basis.n_templates] > 0).any())
     z_err = s_err = None
     if errors:
-        z_err, s_err = _hessian_errors(redshift, sigma, chi2, dof, cost)
+        z_err, s_err = _hessian_errors(redshift, sigma, chi2, dof, cost,
+                                       sigma_free=not stellar_empty)
     if pinned:
         # A dispersion held at a bound is not a stationary point in sigma at
         # all -- chi2 is still descending when the bound stops it -- so the
