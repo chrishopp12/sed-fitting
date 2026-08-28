@@ -148,14 +148,31 @@ LINEAR_SCAN_KEYS = ("z_step_coarse", "n_poly_iter_coarse", "sigma_coarse",
                     "window_steps", "minima_dv_kms")
 LINEAR_GAS_KEYS = ("lines", "sigma_kms", "ratio_locked")
 LINEAR_GAS_GROUP_KEYS = ("name", "lines", "ratios")
-# Ratios fixed by atomic physics, so the pair enters as ONE column and NNLS
-# cannot buy chi-square with an unphysical member. Balmer lines are
+# Ratios fixed by atomic physics -- each pair shares an upper level, so the
+# ratio is set by transition probabilities alone and is independent of
+# temperature, density, abundance and dust. The pair enters as ONE column and
+# NNLS cannot buy chi-square with an unphysical member. Balmer lines are
 # deliberately absent: the decrement is a dust measurement, not a constant.
+#
+# The source is recorded PER GROUP, not once for the table: these four ratios
+# do not come from one place, and a single label would assert a provenance
+# that is false for half of them. It lives beside the table rather than inside
+# a group because ratio_locked resolves into run_id.
+RATIO_SOURCES = {
+    "[OIII]": "Storey & Zeippen (2000)",
+    "[NII]": "Storey & Zeippen (2000)",
+    "[OI]": "Osterbrock & Ferland (2006)",
+    "[SIII]": "Osterbrock & Ferland (2006)",
+}
 LINEAR_GAS_RATIO_LOCKED = (
     {"name": "[OIII]", "lines": ("[OIII]4959", "[OIII]5007"),
      "ratios": (1.0, 2.98)},
     {"name": "[NII]", "lines": ("[NII]6548", "[NII]6584"),
-     "ratios": (1.0, 3.05)},
+     "ratios": (1.0, 2.94)},
+    {"name": "[OI]", "lines": ("[OI]6300", "[OI]6364"),
+     "ratios": (3.0, 1.0)},
+    {"name": "[SIII]", "lines": ("[SIII]9069", "[SIII]9531"),
+     "ratios": (1.0, 2.47)},
 )
 
 BASE_DEFAULTS = {

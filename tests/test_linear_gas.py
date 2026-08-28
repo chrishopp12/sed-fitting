@@ -109,6 +109,44 @@ def test_locked_pairs_are_one_column(lines, gas) -> None:
     assert "[OIII]" in gas.names and "[OIII]5007" not in gas.names
 
 
+# Every locked ratio and the source it came from. The defect this pins was
+# never a wrong number: [NII] sat at a pre-2000 3.05 beside an SZ00 [OIII]
+# 2.98, under a comment claiming both were fixed by atomic physics, and
+# nothing recorded which source either came from. Attributing per group is
+# what keeps a mixed table visible once the ratios stop sharing one origin.
+EXPECTED_RATIOS = {"[OIII]": (1.0, 2.98), "[NII]": (1.0, 2.94),
+                   "[OI]": (3.0, 1.0), "[SIII]": (1.0, 2.47)}
+# Both members of each pair share an upper level, which is the whole warrant
+# for locking them at all.
+UPPER_LEVEL_PAIRS = {"[OIII]": ("[OIII]4959", "[OIII]5007"),
+                     "[NII]": ("[NII]6548", "[NII]6584"),
+                     "[OI]": ("[OI]6300", "[OI]6364"),
+                     "[SIII]": ("[SIII]9069", "[SIII]9531")}
+
+
+def test_locked_ratios_match_their_sources() -> None:
+    from sedfit.core.fitconfig import RATIO_SOURCES
+    got = {group["name"]: tuple(group["ratios"])
+           for group in LINEAR_GAS_RATIO_LOCKED}
+    assert got == EXPECTED_RATIOS
+    assert set(RATIO_SOURCES) == set(EXPECTED_RATIOS)
+    assert all(RATIO_SOURCES[name].strip() for name in EXPECTED_RATIOS)
+
+
+def test_every_locked_group_names_its_pair() -> None:
+    got = {group["name"]: tuple(group["lines"])
+           for group in LINEAR_GAS_RATIO_LOCKED}
+    assert got == UPPER_LEVEL_PAIRS
+
+
+def test_locked_lines_are_all_in_the_packaged_list() -> None:
+    from sedfit.backends.linear.gas import read_line_list, resolve_line_list
+    packaged = read_line_list(resolve_line_list("optical"))
+    for group in LINEAR_GAS_RATIO_LOCKED:
+        for member in group["lines"]:
+            assert member in packaged, f"{member} missing from optical.txt"
+
+
 def test_a_locked_pair_holds_its_ratio(lines) -> None:
     """One column, both members, at the ratio atomic physics fixes."""
     gas = GasBasis(lines, sigma_kms=GAS_SIGMA, ratio_locked=[

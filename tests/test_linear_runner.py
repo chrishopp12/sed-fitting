@@ -464,15 +464,23 @@ def test_a_gas_run_reports_its_lines_apart_from_its_templates(workspace,
                              gas={"lines": "optical", "sigma_kms": 120.0}),
                      spectrum, tmp_path / "gasruns")
 
+    # Derived, not hardcoded: locking another pair changes it, and a literal
+    # here just fails the next time atomic physics is applied correctly.
+    from sedfit.backends.linear.gas import read_line_list, resolve_line_list
+    from sedfit.core.fitconfig import LINEAR_GAS_RATIO_LOCKED
+    n_lines = len(read_line_list(resolve_line_list("optical")))
+    locked = sum(len(g["lines"]) for g in LINEAR_GAS_RATIO_LOCKED)
+    expected = n_lines - locked + len(LINEAR_GAS_RATIO_LOCKED)
+
     assert row["gas"]["sigma_kms"] == 120.0
-    assert row["gas"]["n_columns"] == 18
+    assert row["gas"]["n_columns"] == expected
     fit_json = json.loads((Path(row["path"]) / "fit.json").read_text())
     # amplitudes are the stellar basis; line fluxes are their own field
     assert set(fit_json["amplitudes"]) == {p.name for p in
                                            runner.resolve_templates(
                                                _config(templates,
                                                        spectrum_file)["linear"])}
-    assert len(fit_json["gas_fluxes"]) == 18
+    assert len(fit_json["gas_fluxes"]) == expected
     assert fit_json["gas"]["ratio_locked"][0]["ratios"] == [1.0, 2.98]
 
 

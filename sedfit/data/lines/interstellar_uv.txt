@@ -1,0 +1,7 @@
+# sedfit rest-UV interstellar ABSORPTION list, for masking; rest VACUUM wavelength [A]
+# component            wave_vac_A
+FeII2344                 2344.213
+FeII2374                 2374.460
+FeII2383                 2382.764
+FeII2587                 2586.649
+FeII2600                 2600.172
