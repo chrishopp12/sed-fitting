@@ -111,3 +111,84 @@ def test_band_coverage_is_a_property_of_the_band_not_the_package() -> None:
 
 def test_band_coverage_is_silent_without_gas() -> None:
     assert band_coverage(None, MUSE, 0.0, 1.6) == {}
+
+
+# ---------------------------------------------------------------------
+# An empty stellar basis. Reported as a state, not raised as an error.
+# ---------------------------------------------------------------------
+
+def _flat(level, seed=3, npix=1800):
+    from sedfit.backends.linear import fitting as F
+    wave = np.arange(4800.0, 4800.0 + 2.5 * npix, 2.5)
+    rng = np.random.default_rng(seed)
+    return wave, np.full_like(wave, level) + rng.normal(0, 1.0, wave.size)
+
+
+@pytest.fixture(scope="module")
+def small_basis(tmp_path_factory):
+    from pathlib import Path
+    from sedfit.backends.linear import TemplateBasis
+    paths = sorted(Path("sedfit/data/templates/ssp_c3k_a").glob("ssp_*.dat"))[::8]
+    return TemplateBasis(paths, wave_range=(3400.0, 9410.0), dv_kms=60.0,
+                         normalize_range=(4000.0, 7000.0))
+
+
+@pytest.mark.parametrize("level", [0.0, -0.06, -0.80])
+def test_a_non_positive_continuum_does_not_crash_the_fit(small_basis,
+                                                         level) -> None:
+    from sedfit.backends.linear import fitting as F
+    wave, flux = _flat(level)
+    var = np.ones_like(wave)
+    m = np.ones_like(flux, bool)
+    cheb_x = F._chebyshev_domain(wave, (wave[0], wave[-1]))
+    chi2, amps, _, _ = F.fit_at(0.269, 250.0, wave, flux, var, m, small_basis,
+                                np.ones_like(wave), cheb_x, 8, 4)
+    assert np.isfinite(chi2)
+
+
+@pytest.mark.parametrize("level", [-0.06, -0.80])
+def test_a_negative_continuum_zeroes_the_whole_basis(small_basis,
+                                                     level) -> None:
+    # No non-negative combination of positive templates has a negative mean,
+    # so this is robust rather than marginal -- noise does not rescue it.
+    # At EXACTLY zero it is a coin flip on the noise draw, which is why the
+    # no-crash test above covers 0.0 and this one does not.
+    from sedfit.backends.linear import fitting as F
+    wave, flux = _flat(level)
+    var = np.ones_like(wave)
+    m = np.ones_like(flux, bool)
+    cheb_x = F._chebyshev_domain(wave, (wave[0], wave[-1]))
+    _, amps, _, _ = F.fit_at(0.269, 250.0, wave, flux, var, m, small_basis,
+                             np.ones_like(wave), cheb_x, 8, 4)
+    assert not (amps > 0).any()
+
+
+def test_an_empty_stellar_basis_is_reported(small_basis) -> None:
+    from sedfit.backends.linear import fitting as F
+    wave, flux = _flat(-0.80)
+    err = np.ones_like(wave)
+    fit = F.fit_spectrum(wave, flux, err, np.ones_like(flux, bool), small_basis,
+                         redshift_grid=np.arange(0.264, 0.2721, 4e-4),
+                         sigma_grid=np.array([250.0]), poly_order=8,
+                         poly_domain=(wave[0], wave[-1]), errors=False,
+                         clip_sigma=None)
+    assert fit.stellar_basis_empty is True
+    assert fit.light_fractions == {}
+
+
+def test_a_real_continuum_is_not_reported_as_empty(small_basis) -> None:
+    from sedfit.backends.linear import fitting as F
+    wave = np.arange(4800.0, 9300.0, 2.5)
+    rng = np.random.default_rng(5)
+    w = np.zeros(small_basis.n_templates)
+    w[[0, 2, 4]] = [0.5, 0.3, 0.2]
+    flux = w @ small_basis.design(wave, 0.2689, 250.0)
+    err = np.full_like(flux, flux.mean() / 40.0)
+    fit = F.fit_spectrum(wave, flux + rng.normal(0, err), err,
+                         np.ones_like(flux, bool), small_basis,
+                         redshift_grid=np.arange(0.264, 0.2741, 4e-4),
+                         sigma_grid=np.array([250.0]), poly_order=8,
+                         poly_domain=(wave[0], wave[-1]), errors=False,
+                         clip_sigma=None)
+    assert fit.stellar_basis_empty is False
+    assert fit.light_fractions

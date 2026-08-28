@@ -184,6 +184,17 @@ class LinearFit:
                 zip(self.gas_names, self.amplitudes[len(self.names):])}
 
     @property
+    def stellar_basis_empty(self) -> bool:
+        """NNLS gave every stellar template zero amplitude.
+
+        A state, not an error: the spectrum has no continuum this basis can
+        represent, which for an over-subtracted background is the correct
+        answer rather than a failed one. Any dispersion or light fraction
+        reported alongside it is meaningless.
+        """
+        return not bool((self.stellar_amplitudes > 0).any())
+
+    @property
     def physics_violations(self) -> list:
         """Physical bounds the fitted line set does not respect.
 
@@ -270,6 +281,18 @@ def fit_at(redshift: float, sigma_kms: float, wave_vac: np.ndarray,
         chi2, amps, model = nnls_fit(rows * poly[None, :], flux, var, fitted)
         star = amps @ rows
         good = fitted & (star > _POLY_FLOOR * np.median(star[fitted]))
+        # NNLS can zero the ENTIRE basis, and it does so robustly rather than
+        # marginally: no non-negative combination of positive templates has a
+        # negative or zero mean, so a spectrum whose background was
+        # over-subtracted drives every amplitude to exactly 0. The floor is
+        # then a fraction of zero, `good` is empty, and chebfit raises. This
+        # is not exotic -- a continuum-free population scatters symmetrically
+        # about zero, so roughly half of it lands there, and during a blind
+        # scan most trial redshifts put no line under the gas columns either.
+        # A polynomial needs poly_order + 1 points; with fewer, there is no
+        # continuum to correct and the honest move is to leave it alone.
+        if int(good.sum()) <= poly_order:
+            break
         ratio = np.where(star > 0, flux / np.where(star > 0, star, 1.0), 1.0)
         weight = np.where(good, star / np.sqrt(var), 0.0)
         coefficients = chebyshev.chebfit(cheb_x[good], ratio[good], poly_order,
