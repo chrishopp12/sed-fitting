@@ -1062,12 +1062,24 @@ short list is silent, so there is no default), `sigma_kms` (the nebular
 width, fixed rather than free: a symmetric kernel does not move a line
 centroid, so the redshift is insensitive to it at first order while the
 amplitude is not), and `ratio_locked` (groups entering as **one** column at a
-ratio atomic physics fixes — [OIII] 5007/4959 = 2.98 and [NII] 6584/6548 =
-3.05 by default; Balmer lines stay free, because the decrement is a dust
-measurement). Line fluxes are reported in `gas_fluxes`, apart from
-`light_fractions`: an amplitude on a unit-integrated line column is a flux,
-not a share of a continuum. Gas columns count in `dof` whether or not they
-take amplitude.
+ratio atomic physics fixes — four groups by default, each a pair sharing an
+upper level so the ratio follows from transition probabilities alone: [OIII]
+5007/4959 = 2.98, [NII] 6584/6548 = 2.94, [OI] 6300/6364 = 3.0 and [SIII]
+9531/9069 = 2.47. Balmer lines stay free, because the decrement is a dust
+measurement). Each ratio's source is recorded per group in `RATIO_SOURCES`,
+not once for the table: they do not all come from one place, and a single
+label would assert a provenance false for half of them. Line fluxes are
+reported in `gas_fluxes`, apart from `light_fractions`: an amplitude on a
+unit-integrated line column is a flux, not a share of a continuum. Gas
+columns count in `dof` whether or not they take amplitude.
+
+A locked group only constrains anything where **both** members are in band,
+which is a property of the spectrum's wavelength range and not of the
+package. `runner.plan` computes `band_coverage` against that range and warns
+when a group is inert over the whole scan; on MUSE [SIII] always is, since
+9531 sits past the red edge at every redshift. An inert group is not an
+error — it is a free column whose reported flux is a total extrapolated
+through an assumed ratio, which is worth knowing before quoting it.
 
 **`lsf`** and **`template_resolution`** supply the instrument line spread and
 the basis's own resolution. The kernel is the quadrature *difference*,
